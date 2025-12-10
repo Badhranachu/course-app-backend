@@ -24,6 +24,28 @@ urlpatterns = [
     # Video streaming
     path('videos/<int:video_id>/stream/', views.stream_video, name='stream-video'),
 
+    path("courses/<int:course_id>/modules/", views.course_modules),
+
+    path("test/<int:test_id>/", views.get_test, name="get-test"),
+
+    path("test/<int:test_id>/submit/", views.submit_test),
+
+    path("courses/<int:course_id>/test-history/", views.course_test_history),
+
+
+
+path("videos/<int:video_id>/attachment-preview/", views.attachment_preview),
+path("videos/<int:video_id>/attachment-tree/", views.attachment_tree),
+path("videos/<int:video_id>/attachment-content/<path:file_path>/", views.attachment_content),
+
+
+
+
+
+
+
+
+
 
 
 ]

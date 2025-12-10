@@ -17,11 +17,14 @@ class Course(models.Model):
     title = models.CharField(max_length=200)
     description = models.TextField()
     price = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)])
+    is_active = models.BooleanField(default=True)   # 👈 ADD THIS
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     def __str__(self):
         return self.title
+
+
 
 
 class Video(models.Model):
@@ -29,14 +32,17 @@ class Video(models.Model):
     title = models.CharField(max_length=200)
     description = models.TextField(blank=True)
     video_file = models.FileField(upload_to='videos/')
-    order = models.IntegerField(default=0)
+    folder_attachment = models.FileField(upload_to='video_folders/', blank=True, null=True)  # ZIP ONLY
+
     created_at = models.DateTimeField(auto_now_add=True)
-    
+
     class Meta:
-        ordering = ['order', 'created_at']
-    
+        ordering = ['created_at']
+
     def __str__(self):
         return f"{self.course.title} - {self.title}"
+
+
 
 
 class Enrollment(models.Model):
@@ -58,3 +64,84 @@ class Enrollment(models.Model):
     def __str__(self):
         return f"{self.user.email} - {self.course.title}"
 
+
+
+
+
+
+class Test(models.Model):
+    course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name="tests")
+    name = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.name
+
+
+
+class Question(models.Model):
+    test = models.ForeignKey(Test, on_delete=models.CASCADE, related_name="questions")
+    text = models.CharField(max_length=500)
+
+    option_a = models.CharField(max_length=200)
+    option_b = models.CharField(max_length=200)
+    option_c = models.CharField(max_length=200)
+    option_d = models.CharField(max_length=200)
+
+    correct_answer = models.CharField(max_length=1, choices=[
+        ("A", "Option A"),
+        ("B", "Option B"),
+        ("C", "Option C"),
+        ("D", "Option D"),
+    ])
+    marks = models.PositiveIntegerField(default=1)  # ⭐ NEW
+
+
+    def __str__(self):
+        return f"Q: {self.text[:50]}"
+
+
+class CourseModuleItem(models.Model):
+    ITEM_TYPES = [
+        ("video", "Video"),
+        ("test", "Test"),
+    ]
+
+    course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name="modules")
+    item_type = models.CharField(max_length=10, choices=ITEM_TYPES)
+
+    video = models.ForeignKey(Video, null=True, blank=True, on_delete=models.CASCADE)
+    test = models.ForeignKey(Test, null=True, blank=True, on_delete=models.CASCADE)
+
+    order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["order"]
+
+    def __str__(self):
+        return f"{self.course.title} → {self.item_type} → {self.order}"
+
+
+
+class StudentTest(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="student_tests")
+    test = models.ForeignKey(Test, on_delete=models.CASCADE, related_name="attempts")
+    score = models.IntegerField(default=0)
+    total_marks = models.IntegerField(default=0)
+    submitted_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.user.email} → {self.test.name}"
+    
+
+class StudentAnswer(models.Model):
+    student_test = models.ForeignKey(StudentTest, on_delete=models.CASCADE, related_name="answers")
+    question = models.ForeignKey(Question, on_delete=models.CASCADE)
+    selected_answer = models.CharField(max_length=1)
+    is_correct = models.BooleanField(default=False)
+    marks_awarded = models.PositiveIntegerField(default=0)  # ⭐ ADD THIS
+
+    def __str__(self):
+        return f"Answer by {self.student_test.user.email}"
