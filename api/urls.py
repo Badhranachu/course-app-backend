@@ -38,6 +38,20 @@ path("videos/<int:video_id>/attachment-preview/", views.attachment_preview),
 path("videos/<int:video_id>/attachment-tree/", views.attachment_tree),
 path("videos/<int:video_id>/attachment-content/<path:file_path>/", views.attachment_content),
 
+path("certificate/generate/", views.generate_user_certificate),
+
+
+path("certificate/github-link/", views.save_github_link),
+
+path("certificate/github-link/<int:course_id>/", views.get_github_link),
+
+path("certificate/send/<int:course_id>/", views.send_course_certificate, name="send-course-certificate"),
+
+
+
+
+
+
 
 
 

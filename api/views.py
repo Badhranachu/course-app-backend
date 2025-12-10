@@ -428,3 +428,100 @@ def course_videos(request, course_id):
     videos = course.videos.all().order_by("id")
     serializer = VideoSerializer(videos, many=True, context={"request": request})
     return Response(serializer.data)
+
+
+from api.utils import generate_certificate
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def generate_user_certificate(request):
+    user = request.user
+    name = user.username or user.email.split("@")[0]
+
+    file_path = generate_certificate(name)
+
+    return FileResponse(open(file_path, "rb"), as_attachment=True, filename="certificate.pdf")
+
+
+from api.models import Certificate
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def save_github_link(request):
+    course_id = request.data.get("course_id")
+    github_link = request.data.get("github_link")
+
+    if not github_link:
+        return Response({"error": "Github link is required"}, status=400)
+
+    # Create or update one certificate record per user+course
+    obj, created = Certificate.objects.update_or_create(
+        user=request.user,
+        course_id=course_id,
+        defaults={"github_link": github_link},
+    )
+
+    return Response({
+        "message": "Github link saved successfully",
+        "created": created
+    })
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def get_github_link(request, course_id):
+    cert = Certificate.objects.filter(user=request.user, course_id=course_id).first()
+
+    return Response({
+        "github_link": cert.github_link if cert and cert.github_link else None
+    })
+
+from django.core.mail import EmailMessage
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def send_course_certificate(request, course_id):
+    user = request.user
+
+    # 1️⃣ Check github link exists for this user+course
+    cert = Certificate.objects.filter(
+        user=user,
+        course_id=course_id,
+        github_link__isnull=False
+    ).exclude(github_link="").first()
+
+    if not cert:
+        return Response(
+            {"error": "Github link not found. Please submit your Github repository link first."},
+            status=400
+        )
+
+    # 2️⃣ Get course (for nice email subject/body)
+    try:
+        course = Course.objects.get(id=course_id)
+    except Course.DoesNotExist:
+        return Response({"error": "Course not found"}, status=404)
+
+    # 3️⃣ Generate certificate PDF (reuse your existing util)
+    name = user.username or user.email.split("@")[0]
+    file_path = generate_certificate(name)
+
+    # 4️⃣ Send email with attachment
+    subject = f"Certificate for {course.title}"
+    body = f"Hi {name},\n\nAttached is your certificate for completing the course: {course.title}.\n\nRegards,\nYour LMS Team"
+
+    email = EmailMessage(
+        subject=subject,
+        body=body,
+        from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
+        to=[user.email],
+    )
+
+    email.attach_file(file_path)
+    email.send(fail_silently=False)
+
+    return Response({"message": "Certificate sent to your registered email."})
+
+
+from django.core.mail import EmailMessage       # sending email
+from django.conf import settings               # for DEFAULT_FROM_EMAIL
+from api.utils import generate_certificate     # certificate PDF generator
+from .models import Certificate                # your model

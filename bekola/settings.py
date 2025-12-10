@@ -4,6 +4,11 @@ from pathlib import Path
 from datetime import timedelta
 import os
 
+
+import ssl
+ssl._create_default_https_context = ssl._create_unverified_context
+
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = 'django-insecure-bekola-dev-key-change-in-production'
@@ -175,3 +180,14 @@ STATIC_URL = '/static/'
 STATICFILES_DIRS = [
     BASE_DIR / "static",
 ]
+
+
+
+
+EMAIL_BACKEND = "api.custom_email_backend.UnverifiedSSLBackend"
+EMAIL_HOST = "smtp.gmail.com"
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = "dairiesofbadhran@gmail.com"
+EMAIL_HOST_PASSWORD = "dnjijwwhtxukdecz"
+DEFAULT_FROM_EMAIL = EMAIL_HOST_USER

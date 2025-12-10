@@ -190,3 +190,12 @@ class TestDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = Test
         fields = ["id", "name", "description", "questions"]
+
+
+
+
+from api.models import Certificate
+class CertificateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Certificate
+        fields = "__all__"

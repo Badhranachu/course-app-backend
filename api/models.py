@@ -145,3 +145,16 @@ class StudentAnswer(models.Model):
 
     def __str__(self):
         return f"Answer by {self.student_test.user.email}"
+
+
+
+class Certificate(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    course = models.ForeignKey(Course, on_delete=models.CASCADE)
+
+    github_link = models.CharField(max_length=500, blank=True, null=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.user.username} - {self.course.title}"
