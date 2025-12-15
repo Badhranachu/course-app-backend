@@ -1,66 +1,131 @@
-#backend/api/urls.py
-
-
 from django.urls import path
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import views
+from api import views
 
 urlpatterns = [
-    # Auth endpoints
-    path('auth/signup/', views.signup, name='signup'),
-    path('auth/login/', views.login, name='login'),
-    path('auth/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
-    path('auth/me/', views.get_user, name='get_user'),
-    
-    # Course endpoints
-    path('courses/', views.CourseListCreateView.as_view(), name='course-list-create'),
-    path('courses/<int:pk>/', views.CourseDetailView.as_view(), name='course-detail'),
-    path('courses/<int:course_id>/videos/', views.course_videos, name='course-videos'),
-    
-    # Payment endpoints
-    path('payment/create-order/', views.create_payment_order, name='create-order'),
-    path('payment/verify/', views.verify_payment, name='verify-payment'),
-    
-    # Video streaming
-    path('videos/<int:video_id>/stream/', views.stream_video, name='stream-video'),
 
-    path("courses/<int:course_id>/modules/", views.course_modules),
+    # =========================
+    # AUTH
+    # =========================
+    path("auth/signup/", views.SignupAPIView.as_view(), name="signup"),
+    path("auth/login/", views.LoginAPIView.as_view(), name="login"),
+    path("auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
+    path("auth/me/", views.GetUserAPIView.as_view(), name="get-user"),
 
-    path("test/<int:test_id>/", views.get_test, name="get-test"),
-
-    path("test/<int:test_id>/submit/", views.submit_test),
-
-    path("courses/<int:course_id>/test-history/", views.course_test_history),
-
-
-
-path("videos/<int:video_id>/attachment-preview/", views.attachment_preview),
-path("videos/<int:video_id>/attachment-tree/", views.attachment_tree),
-path("videos/<int:video_id>/attachment-content/<path:file_path>/", views.attachment_content),
-
-path("certificate/generate/", views.generate_user_certificate),
-
-
-path("certificate/github-link/", views.save_github_link),
-
-path("certificate/github-link/<int:course_id>/", views.get_github_link),
-
-path("certificate/send/<int:course_id>/", views.send_course_certificate, name="send-course-certificate"),
+    # =========================
+    # COURSES
+    # =========================
+    path("courses/", views.CourseListCreateAPIView.as_view(), name="course-list"),
+    path("courses/<int:pk>/", views.CourseDetailAPIView.as_view(), name="course-detail"),
+    path("courses/<int:course_id>/modules/", views.CourseModulesAPIView.as_view()),
+    path("courses/<int:course_id>/videos/", views.CourseVideosAPIView.as_view()),
 
 
 
 
 
+    # =========================
+    # PAYMENT
+    # =========================
+    path("payment/create-order/", views.CreatePaymentOrderAPIView.as_view()),
+    path("payment/verify/", views.VerifyPaymentAPIView.as_view()),
+
+    # =========================
+    # VIDEO
+    # =========================
+    path("videos/<int:video_id>/stream/", views.StreamVideoAPIView.as_view()),
+
+
+
+    #update video progress and get video progress
+path(
+    "courses/<int:course_id>/videos/progress/",
+    views.UpdateVideoProgressAPIView.as_view(),
+    name="video-progress"
+),
+
+
+    # get module progres
+    path(
+    "courses/<int:course_id>/module-progress/",
+    views.CourseModuleProgressAPIView.as_view(),
+    name="course-module-status"
+),
 
 
 
 
+    # =========================
+    # TESTS
+    # =========================
+# 1️⃣ List all tests for a course (enrolled students only)
+    path(
+        "courses/<int:course_id>/tests/",
+        views.CourseTestsAPIView.as_view(),
+        name="course-tests"
+    ),
+    path(
+        "courses/<int:course_id>/tests/<int:test_id>/",
+        views.CourseTestsAPIView.as_view(),
+        name="course-test-detail"
+    ),
+
+    # 3️⃣ Submit test answers
+    path(
+    "courses/<int:course_id>/tests/<int:test_id>/submit/",
+    views.SubmitTestAPIView.as_view(),
+    name="test-submit"
+    ),
+
+    # 4️⃣ Test history (summary list for course)
+path(
+    "courses/<int:course_id>/tests/history/",
+    views.TestHistoryAPIView.as_view(),
+    name="test-history"
+),
+
+path(
+    "courses/<int:course_id>/tests/history/<int:student_test_id>/",
+    views.TestHistoryAPIView.as_view(),
+    name="test-history-detail"
+),
 
 
+    # =========================
+    # ATTACHMENTS
+    # =========================
+path(
+    "courses/<int:course_id>/videos/<int:video_id>/attachment-preview/",
+    views.AttachmentPreviewAPIView.as_view(),
+    name="attachment-preview"
+),
 
+path(
+    "courses/<int:course_id>/videos/<int:video_id>/attachment-tree/",
+    views.AttachmentTreeAPIView.as_view(),
+    name="attachment-tree"
+),
 
+path(
+    "courses/<int:course_id>/videos/<int:video_id>/attachment-content/<path:file_path>/",
+    views.AttachmentContentAPIView.as_view(),
+    name="attachment-content"
+),
+    # =========================
+    # CERTIFICATES
+    # =========================
+path(
+    "certificate/github-link/<int:course_id>/",
+    views.SaveGithubLinkAPIView.as_view(),
+    name="certificate-github-link"
+),
+    path("certificate/generate/", views.GenerateUserCertificateAPIView.as_view()),
+    path("certificate/send/<int:course_id>/", views.SendCourseCertificateAPIView.as_view()),
+    path("certificate/my/", views.ListUserCertificatesAPIView.as_view()),
+    path("certificate/github-link/<int:course_id>/", views.GetGithubLinkAPIView.as_view()),
 
-
-
+    # =========================
+    # MODULE / PROGRESS
+    # =========================
+    path("modules/<int:module_id>/complete-video/", views.CompleteVideoAPIView.as_view()),
 ]
-

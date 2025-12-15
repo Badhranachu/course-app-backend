@@ -3,37 +3,36 @@
 
 from rest_framework import serializers
 from django.contrib.auth.password_validation import validate_password
-from .models import User, Course, Video, Enrollment
+from .models import CustomUser, Course, Video, Enrollment
 
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
-        model = User
-        fields = ['id', 'email', 'username', 'created_at']
-        read_only_fields = ['id', 'created_at']
+        model = CustomUser
+        fields = ['id', 'email', 'role']
+
 
 
 class UserSignupSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, validators=[validate_password])
     password2 = serializers.CharField(write_only=True)
-    
+
     class Meta:
-        model = User
-        fields = ['email', 'username', 'password', 'password2']
-    
+        model = CustomUser
+        fields = ['email', 'password', 'password2']
+
     def validate(self, attrs):
         if attrs['password'] != attrs['password2']:
-            raise serializers.ValidationError({"password": "Password fields didn't match."})
+            raise serializers.ValidationError({"password": "Passwords do not match"})
         return attrs
-    
+
     def create(self, validated_data):
         validated_data.pop('password2')
-        user = User.objects.create_user(
+        return CustomUser.objects.create_user(
             email=validated_data['email'],
-            username=validated_data['username'],
             password=validated_data['password']
         )
-        return user
+
 
 
 class VideoSerializer(serializers.ModelSerializer):
@@ -51,10 +50,15 @@ class VideoSerializer(serializers.ModelSerializer):
         return None
 
     def get_thumbnail(self, obj):
-        request = self.context.get('request')
-        if request and obj.video_file:
-            return request.build_absolute_uri('/static/default-thumb.png') 
-        return None
+        request = self.context.get("request")
+
+        if request is None:
+            return "/static/default-thumb.png"
+
+        return request.build_absolute_uri("/static/default-thumb.png")
+
+
+
 
 
 def get_serializer_context(self):
@@ -112,13 +116,16 @@ class EnrollmentSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'status', 'enrolled_at']
 
 
-from api.models import CourseModuleItem
+from api.models import CourseModuleItem,StudentTest
 class CourseModuleSerializer(serializers.ModelSerializer):
     title = serializers.SerializerMethodField()
     description = serializers.SerializerMethodField()
     thumbnail = serializers.SerializerMethodField()
     item_id = serializers.SerializerMethodField()
-    attachment_url = serializers.SerializerMethodField()  # ⭐ REQUIRED
+    attachment_url = serializers.SerializerMethodField()
+
+    # ⭐ Computed field, NOT model field
+    is_unlocked = serializers.SerializerMethodField()
 
     class Meta:
         model = CourseModuleItem
@@ -130,9 +137,13 @@ class CourseModuleSerializer(serializers.ModelSerializer):
             "thumbnail",
             "item_id",
             "order",
-            "attachment_url",   # ⭐ ADD IN FIELDS
+            "attachment_url",
+            "is_unlocked",   # Now VALID
         ]
 
+    # ---------------------------------
+    # TITLE
+    # ---------------------------------
     def get_title(self, obj):
         if obj.item_type == "video" and obj.video:
             return obj.video.title
@@ -140,6 +151,9 @@ class CourseModuleSerializer(serializers.ModelSerializer):
             return obj.test.name
         return ""
 
+    # ---------------------------------
+    # DESCRIPTION
+    # ---------------------------------
     def get_description(self, obj):
         if obj.item_type == "video" and obj.video:
             return obj.video.description
@@ -147,12 +161,18 @@ class CourseModuleSerializer(serializers.ModelSerializer):
             return obj.test.description
         return ""
 
+    # ---------------------------------
+    # THUMBNAIL (SAFE)
+    # ---------------------------------
     def get_thumbnail(self, obj):
         request = self.context.get("request")
-        if obj.item_type == "video" and obj.video:
-            return request.build_absolute_uri("/static/default-thumb.png")
-        return None
+        if request is None:
+            return "/static/default-thumb.png"
+        return request.build_absolute_uri("/static/default-thumb.png")
 
+    # ---------------------------------
+    # ITEM ID
+    # ---------------------------------
     def get_item_id(self, obj):
         if obj.item_type == "video" and obj.video:
             return obj.video.id
@@ -160,14 +180,24 @@ class CourseModuleSerializer(serializers.ModelSerializer):
             return obj.test.id
         return None
 
-    # ⭐⭐ FIX FOR YOUR ERROR ⭐⭐
+    # ---------------------------------
+    # ATTACHMENT URL (SAFE)
+    # ---------------------------------
     def get_attachment_url(self, obj):
         if obj.item_type == "video" and obj.video and obj.video.folder_attachment:
             request = self.context.get("request")
+            if request is None:
+                return obj.video.folder_attachment.url
             return request.build_absolute_uri(obj.video.folder_attachment.url)
         return None
 
-
+    # ---------------------------------
+    # UNLOCK LOGIC HERE
+    # ---------------------------------
+    def get_is_unlocked(self, obj):
+        user = self.context.get("user")
+        unlock = StudentModuleUnlock.objects.filter(user=user, module=obj).first()
+        return unlock.is_unlocked if unlock else False
 
 from api.models import Question,Test
 class QuestionSerializer(serializers.ModelSerializer):
@@ -199,3 +229,17 @@ class CertificateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Certificate
         fields = "__all__"
+
+
+from api.models import StudentModuleUnlock,StudentContentProgress
+class StudentModuleUnlockSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StudentModuleUnlock
+        fields = ['id', 'module', 'is_unlocked', 'unlocked_at']
+
+
+
+class StudentContentProgressSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StudentContentProgress
+        fields = ['id', 'module', 'is_completed', 'completed_at']

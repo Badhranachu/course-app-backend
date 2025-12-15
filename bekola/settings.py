@@ -118,6 +118,7 @@ AUTHENTICATION_BACKENDS = [
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
+        'api.authentication.UserTokenAuthentication'
     ),
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
@@ -125,6 +126,9 @@ REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 10
 }
+
+
+VIDEO_PROGRESS_TEST_MODE = True   # 🔧 set False in production
 
 # -----------------------------
 #  JWT SETTINGS
@@ -149,6 +153,8 @@ CORS_ALLOWED_ORIGINS = [
 ]
 
 CORS_ALLOW_CREDENTIALS = True
+CORS_EXPOSE_HEADERS = ['Content-Range', 'Accept-Ranges']
+
 
 CORS_ALLOW_HEADERS = [
     "content-type",
@@ -158,6 +164,8 @@ CORS_ALLOW_HEADERS = [
     "user-agent",
     "x-csrftoken",
     "accept-encoding",
+    "content-type",
+    "range"
 ]
 
 CORS_ALLOW_METHODS = [
@@ -172,8 +180,8 @@ CORS_ALLOW_METHODS = [
 # -----------------------------
 #  RAZORPAY (OPTIONAL)
 # -----------------------------
-RAZORPAY_KEY_ID = "rzp_test_RpWliY9Kkp650I"
-RAZORPAY_KEY_SECRET = "GFsEv39Ct3rz6GC8k8MKEu0E"
+RAZORPAY_KEY_ID = "rzp_test_RrATUAvT1J4mmj"
+RAZORPAY_KEY_SECRET = "CCLrGpxQ5GIy8agGbfd0Yae5"
 
 
 STATIC_URL = '/static/'
@@ -181,6 +189,8 @@ STATICFILES_DIRS = [
     BASE_DIR / "static",
 ]
 
+CORS_ALLOW_ALL_ORIGINS = True
+AUTH_USER_MODEL = "api.CustomUser"
 
 
 
