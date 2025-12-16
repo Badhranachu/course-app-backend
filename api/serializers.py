@@ -12,26 +12,44 @@ class UserSerializer(serializers.ModelSerializer):
         fields = ['id', 'email', 'role']
 
 
-
+from api.models import StudentProfile
 class UserSignupSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True, validators=[validate_password])
+    password = serializers.CharField(
+        write_only=True,
+        validators=[validate_password]
+    )
     password2 = serializers.CharField(write_only=True)
+    full_name = serializers.CharField(write_only=True)
 
     class Meta:
         model = CustomUser
-        fields = ['email', 'password', 'password2']
+        fields = ["email", "full_name", "password", "password2"]
 
     def validate(self, attrs):
-        if attrs['password'] != attrs['password2']:
-            raise serializers.ValidationError({"password": "Passwords do not match"})
+        if attrs["password"] != attrs["password2"]:
+            raise serializers.ValidationError({
+                "password": ["Passwords do not match"]
+            })
         return attrs
 
     def create(self, validated_data):
-        validated_data.pop('password2')
-        return CustomUser.objects.create_user(
-            email=validated_data['email'],
-            password=validated_data['password']
+        full_name = validated_data.pop("full_name")
+        validated_data.pop("password2")
+
+        # 1️⃣ Create user (FORCE student role)
+        user = CustomUser.objects.create_user(
+            email=validated_data["email"],
+            password=validated_data["password"],
+            role="student"  # 🔒 always student
         )
+
+        # 2️⃣ Create student profile
+        StudentProfile.objects.create(
+            user=user,
+            full_name=full_name
+        )
+
+        return user
 
 
 

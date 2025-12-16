@@ -3,18 +3,23 @@
 from pathlib import Path
 from datetime import timedelta
 import os
-
-
 import ssl
-ssl._create_default_https_context = ssl._create_unverified_context
 
+ssl._create_default_https_context = ssl._create_unverified_context
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# -------------------------------------------------
+# BASIC SETTINGS
+# -------------------------------------------------
 SECRET_KEY = 'django-insecure-bekola-dev-key-change-in-production'
 DEBUG = True
+
 ALLOWED_HOSTS = ['*']
 
+# -------------------------------------------------
+# INSTALLED APPS
+# -------------------------------------------------
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -25,18 +30,17 @@ INSTALLED_APPS = [
 
     # Third-party
     'rest_framework',
-    'rest_framework_simplejwt',
     'corsheaders',
 
-    # Your app
+    # Local
     'api',
 ]
 
-# -----------------------------
-#  MIDDLEWARE (VERY IMPORTANT)
-# -----------------------------
+# -------------------------------------------------
+# MIDDLEWARE
+# -------------------------------------------------
 MIDDLEWARE = [
-    'corsheaders.middleware.CorsMiddleware',  # MUST BE FIRST
+    'corsheaders.middleware.CorsMiddleware',  # MUST be first
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -48,6 +52,9 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = 'bekola.urls'
 
+# -------------------------------------------------
+# TEMPLATES
+# -------------------------------------------------
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
@@ -66,9 +73,9 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'bekola.wsgi.application'
 
-# -----------------------------
-#  DATABASE
-# -----------------------------
+# -------------------------------------------------
+# DATABASE
+# -------------------------------------------------
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
@@ -76,9 +83,9 @@ DATABASES = {
     }
 }
 
-# -----------------------------
-#  PASSWORD VALIDATORS
-# -----------------------------
+# -------------------------------------------------
+# PASSWORD VALIDATION
+# -------------------------------------------------
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
     {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator'},
@@ -86,75 +93,63 @@ AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
 
+# -------------------------------------------------
+# INTERNATIONALIZATION
+# -------------------------------------------------
 LANGUAGE_CODE = 'en-us'
 TIME_ZONE = 'UTC'
 USE_I18N = True
 USE_TZ = True
 
-STATIC_URL = 'static/'
+# -------------------------------------------------
+# STATIC & MEDIA
+# -------------------------------------------------
+STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+STATICFILES_DIRS = [BASE_DIR / "static"]
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# -----------------------------
-#  CUSTOM USER MODEL
-# -----------------------------
-AUTH_USER_MODEL = 'api.User'
+# -------------------------------------------------
+# CUSTOM USER MODEL
+# -------------------------------------------------
+AUTH_USER_MODEL = "api.CustomUser"
 
-# -----------------------------
-#  EMAIL LOGIN BACKEND
-# -----------------------------
+# -------------------------------------------------
+# AUTH BACKENDS (EMAIL LOGIN)
+# -------------------------------------------------
 AUTHENTICATION_BACKENDS = [
-    'api.backends.EmailBackend',  # Use email to authenticate
+    'api.backends.EmailBackend',
     'django.contrib.auth.backends.ModelBackend',
 ]
 
-# -----------------------------
-#  REST FRAMEWORK
-# -----------------------------
+# -------------------------------------------------
+# REST FRAMEWORK (DB TOKEN AUTH)
+# -------------------------------------------------
 REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': (
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
-        'api.authentication.UserTokenAuthentication'
-    ),
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'api.authentication.UserTokenAuthentication',
+    ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
     ],
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
-    'PAGE_SIZE': 10
+    'PAGE_SIZE': 10,
 }
 
+# -------------------------------------------------
+# VIDEO PROGRESS MODE
+# -------------------------------------------------
+VIDEO_PROGRESS_TEST_MODE = True  # set False in production
 
-VIDEO_PROGRESS_TEST_MODE = True   # 🔧 set False in production
-
-# -----------------------------
-#  JWT SETTINGS
-# -----------------------------
-SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(hours=1),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
-    'ROTATE_REFRESH_TOKENS': True,
-    'BLACKLIST_AFTER_ROTATION': True,
-    'UPDATE_LAST_LOGIN': True,
-    'ALGORITHM': 'HS256',
-    'SIGNING_KEY': SECRET_KEY,
-    'AUTH_HEADER_TYPES': ('Bearer',),
-}
-
-# -----------------------------
-#  CORS CONFIG (THE FIX)
-# -----------------------------
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-]
-
+# -------------------------------------------------
+# CORS CONFIG
+# -------------------------------------------------
+CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
-CORS_EXPOSE_HEADERS = ['Content-Range', 'Accept-Ranges']
-
 
 CORS_ALLOW_HEADERS = [
     "content-type",
@@ -164,8 +159,7 @@ CORS_ALLOW_HEADERS = [
     "user-agent",
     "x-csrftoken",
     "accept-encoding",
-    "content-type",
-    "range"
+    "range",
 ]
 
 CORS_ALLOW_METHODS = [
@@ -177,23 +171,14 @@ CORS_ALLOW_METHODS = [
     "OPTIONS",
 ]
 
-# -----------------------------
-#  RAZORPAY (OPTIONAL)
-# -----------------------------
-RAZORPAY_KEY_ID = "rzp_test_RrATUAvT1J4mmj"
-RAZORPAY_KEY_SECRET = "CCLrGpxQ5GIy8agGbfd0Yae5"
-
-
-STATIC_URL = '/static/'
-STATICFILES_DIRS = [
-    BASE_DIR / "static",
+CORS_EXPOSE_HEADERS = [
+    "Content-Range",
+    "Accept-Ranges",
 ]
 
-CORS_ALLOW_ALL_ORIGINS = True
-AUTH_USER_MODEL = "api.CustomUser"
-
-
-
+# -------------------------------------------------
+# EMAIL SETTINGS
+# -------------------------------------------------
 EMAIL_BACKEND = "api.custom_email_backend.UnverifiedSSLBackend"
 EMAIL_HOST = "smtp.gmail.com"
 EMAIL_PORT = 587
@@ -201,3 +186,9 @@ EMAIL_USE_TLS = True
 EMAIL_HOST_USER = "dairiesofbadhran@gmail.com"
 EMAIL_HOST_PASSWORD = "dnjijwwhtxukdecz"
 DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
+
+# -------------------------------------------------
+# RAZORPAY (OPTIONAL)
+# -------------------------------------------------
+RAZORPAY_KEY_ID = "rzp_test_RrATUAvT1J4mmj"
+RAZORPAY_KEY_SECRET = "CCLrGpxQ5GIy8agGbfd0Yae5"

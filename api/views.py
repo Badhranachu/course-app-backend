@@ -217,15 +217,17 @@ class CourseModulesAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, course_id):
+        user = request.user
         course = get_object_or_404(Course, id=course_id)
 
-        # ✅ Must be enrolled
+        # ✅ Correct enrollment check
         if not Enrollment.objects.filter(
-            user=request.user,
-            course=course
+            user=user,
+            course=course,
+            status__in=["pending", "completed"]
         ).exists():
             return Response(
-                {"error": "You must enroll first"},
+                {"error": "You are not enrolled in this course"},
                 status=403
             )
 
@@ -237,7 +239,7 @@ class CourseModulesAPIView(APIView):
         first = modules.first()
         if first:
             StudentModuleUnlock.objects.get_or_create(
-                user=request.user,
+                user=user,
                 module=first,
                 defaults={"is_unlocked": True}
             )
@@ -247,7 +249,7 @@ class CourseModulesAPIView(APIView):
                 module,
                 context={
                     "request": request,
-                    "user": request.user
+                    "user": user
                 }
             ).data
             for module in modules
@@ -314,17 +316,24 @@ class StreamVideoAPIView(APIView):
     authentication_classes = [UserTokenAuthentication]
     permission_classes = [IsAuthenticated]
 
-    def get(self, request, video_id):
-        video = get_object_or_404(Video, id=video_id)
+    def head(self, request, course_id, video_id):
+        return self.get(request, course_id, video_id)
 
-        # 🔒 ENROLLMENT CHECK (VERY IMPORTANT)
-        is_enrolled = Enrollment.objects.filter(
-            user=request.user,
-            course=video.course,
+    def get(self, request, course_id, video_id):
+        user = request.user
+
+        # 1️⃣ Validate course
+        course = get_object_or_404(Course, id=course_id)
+
+        # 2️⃣ Validate video belongs to course
+        video = get_object_or_404(Video, id=video_id, course=course)
+
+        # 3️⃣ Enrollment check
+        if not Enrollment.objects.filter(
+            user=user,
+            course=course,
             status="completed"
-        ).exists()
-
-        if not is_enrolled:
+        ).exists():
             return Response(
                 {"error": "You are not enrolled in this course"},
                 status=403
@@ -335,7 +344,7 @@ class StreamVideoAPIView(APIView):
         range_header = request.headers.get("Range")
 
         # ===============================
-        # PARTIAL CONTENT (VIDEO SEEKING)
+        # PARTIAL CONTENT (SEEKING)
         # ===============================
         if range_header:
             start, end = range_header.replace("bytes=", "").split("-")
@@ -357,10 +366,14 @@ class StreamVideoAPIView(APIView):
         # ===============================
         # FULL STREAM
         # ===============================
-        response = FileResponse(open(video_path, "rb"), content_type="video/mp4")
+        response = FileResponse(
+            open(video_path, "rb"),
+            content_type="video/mp4"
+        )
         response["Accept-Ranges"] = "bytes"
         response["Cache-Control"] = "no-store"
         return response
+
 # ============================================================
 # TEST SYSTEM
 # ============================================================
@@ -424,6 +437,7 @@ class SubmitTestAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, course_id, test_id):
+
         # ----------------------------------
         # 1️⃣ Validate test belongs to course
         # ----------------------------------
@@ -449,8 +463,6 @@ class SubmitTestAPIView(APIView):
         # ----------------------------------
         # 3️⃣ Block ONLY if already PASSED
         # ----------------------------------
-        passed_attempt_exists = False
-
         previous_attempts = StudentTest.objects.filter(
             user=request.user,
             test=test
@@ -458,14 +470,10 @@ class SubmitTestAPIView(APIView):
 
         for attempt in previous_attempts:
             if attempt.total_marks > 0 and attempt.score >= (attempt.total_marks / 2):
-                passed_attempt_exists = True
-                break
-
-        if passed_attempt_exists:
-            return Response(
-                {"error": "You have already passed this test"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+                return Response(
+                    {"error": "You have already passed this test"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
         # ----------------------------------
         # 4️⃣ Create new attempt
@@ -514,6 +522,43 @@ class SubmitTestAPIView(APIView):
 
         passed = total > 0 and score >= (total / 2)
 
+        # ======================================================
+        # 7️⃣ IF PASSED → COMPLETE THIS MODULE & UNLOCK NEXT
+        # ======================================================
+        if passed:
+            current_module = CourseModuleItem.objects.filter(
+                course_id=course_id,
+                item_type="test",
+                test_id=test.id   # ✅ FIX HERE
+            ).first()
+
+            if current_module:
+                # mark completed
+                StudentContentProgress.objects.update_or_create(
+                    user=request.user,
+                    module=current_module,
+                    defaults={
+                        "is_completed": True,
+                        "completed_at": timezone.now()
+                    }
+                )
+
+                # unlock next module by order
+                next_module = CourseModuleItem.objects.filter(
+                    course_id=course_id,
+                    order__gt=current_module.order
+                ).order_by("order").first()
+
+                if next_module:
+                    StudentModuleUnlock.objects.update_or_create(
+                        user=request.user,
+                        module=next_module,
+                        defaults={"is_unlocked": True}
+                    )
+
+        # ----------------------------------
+        # 8️⃣ Response
+        # ----------------------------------
         return Response({
             "message": "Test submitted successfully",
             "score": score,
@@ -624,7 +669,7 @@ class AttachmentPreviewAPIView(APIView):
         if not Enrollment.objects.filter(
             user=request.user,
             course_id=course_id,
-            status="completed"
+            status__in=["active", "completed"]
         ).exists():
             return Response(
                 {"error": "You are not enrolled in this course"},
@@ -639,17 +684,6 @@ class AttachmentPreviewAPIView(APIView):
         })
 
 
-
-# def build_tree_structure(file_list):
-#     tree = {}
-#     for path in file_list:
-#         parts = path.split("/")
-#         current = tree
-#         for p in parts:
-#             if p not in current:
-#                 current[p] = {}
-#             current = current[p]
-#     return tree
 
 
 class AttachmentTreeAPIView(APIView):
@@ -809,6 +843,40 @@ from django.core.files import File
 from api.models import PreCertificate
 class SaveGithubLinkAPIView(APIView):
     permission_classes = [IsAuthenticated]
+
+    def get(self, request, course_id):
+        course = get_object_or_404(Course, id=course_id)
+
+        # 1️⃣ Certificate already generated
+        cert = Certificate.objects.filter(
+            user=request.user,
+            course=course
+        ).first()
+
+        if cert:
+            return Response({
+                "completed": True,
+                "github_link": cert.github_link if hasattr(cert, "github_link") else None,
+                "certificate_generated": True
+            }, status=200)
+
+        # 2️⃣ Certificate request pending
+        precert = PreCertificate.objects.filter(
+            user=request.user,
+            course=course
+        ).first()
+
+        if precert:
+            return Response({
+                "completed": True,
+                "github_link": precert.github_link,
+                "certificate_generated": False
+            }, status=200)
+
+        # 3️⃣ Nothing submitted
+        return Response({
+            "completed": False
+        }, status=200)
 
     def post(self, request, course_id):
         course = get_object_or_404(Course, id=course_id)
@@ -1059,128 +1127,89 @@ class UpdateVideoProgressAPIView(APIView):
 
     def post(self, request, course_id):
         user = request.user
-
         video_id = request.data.get("video_id")
         current_time = int(request.data.get("current_time", 0))
 
-        # -----------------------------
-        # 1️⃣ Validate course
-        # -----------------------------
+        # 1️⃣ Course
         course = get_object_or_404(Course, id=course_id)
 
-        # -----------------------------
-        # 2️⃣ Enrollment check
-        # -----------------------------
+        # 2️⃣ Enrollment
         if not Enrollment.objects.filter(
             user=user,
             course=course,
-            status="completed"
+            status__in=["pending", "completed"]
         ).exists():
-            return Response(
-                {"error": "You are not enrolled in this course"},
-                status=status.HTTP_403_FORBIDDEN
-            )
+            return Response({"error": "Not enrolled"}, status=403)
 
-        # -----------------------------
-        # 3️⃣ Validate video
-        # -----------------------------
-        video = get_object_or_404(
-            Video,
-            id=video_id,
-            course=course
+        # 3️⃣ Video
+        video = get_object_or_404(Video, id=video_id, course=course)
+
+        # 4️⃣ Module (VERY IMPORTANT)
+        module = get_object_or_404(
+            CourseModuleItem,
+            course=course,
+            video=video,
+            item_type="video"
         )
 
-        # -----------------------------
-        # 4️⃣ Get or create progress
-        # -----------------------------
+        # 5️⃣ Video progress
         progress, _ = StudentVideoProgress.objects.get_or_create(
             user=user,
             video=video
         )
 
-        # -----------------------------
-        # 5️⃣ Progress tracking (UPDATED)
-        # -----------------------------
-        delta = current_time - progress.last_position
+        # 6️⃣ Sync progress (allow jump)
+        if video.duration:
+            progress.last_position = min(max(progress.last_position, current_time), video.duration)
+            progress.watched_seconds = min(max(progress.watched_seconds, current_time), video.duration)
 
-        if settings.VIDEO_PROGRESS_TEST_MODE:
-            # 🔓 TEST MODE: trust time
-            progress.watched_seconds = max(
-                progress.watched_seconds,
-                current_time
-            )
-        else:
-            # 🔐 PRODUCTION MODE
-            if 0 < delta <= MAX_FORWARD_SKIP:
-                progress.watched_seconds += delta
-            # delta <= 0 → backward seek → allowed but no progress
-            # delta > 1800 → skip too big → ignored
-
-        # Update last_position ONLY if forward
-        if current_time > progress.last_position:
-            progress.last_position = current_time
-
-        # Cap watched time to video duration
-        progress.watched_seconds = min(
-            progress.watched_seconds,
-            video.duration or 0
-        )
-
-        # -----------------------------
-        # 6️⃣ Completion check (90%)
-        # -----------------------------
+        # 7️⃣ Completion check (90%)
         completion_threshold = int(video.duration * 0.9) if video.duration else 0
 
-        if (
-            not progress.is_completed
-            and video.duration
-            and progress.watched_seconds >= completion_threshold
-        ):
+        if not progress.is_completed and progress.watched_seconds >= completion_threshold:
+            # ✅ VIDEO COMPLETED
             progress.is_completed = True
             progress.completed_at = timezone.now()
+            progress.last_position = video.duration
+            progress.watched_seconds = video.duration
 
-            module = CourseModuleItem.objects.filter(
+            # ✅ MODULE COMPLETED (FIRST)
+            StudentContentProgress.objects.update_or_create(
+                user=user,
+                module=module,
+                defaults={
+                    "is_completed": True,
+                    "completed_at": timezone.now()
+                }
+            )
+
+            # ✅ UNLOCK NEXT MODULE
+            next_module = CourseModuleItem.objects.filter(
                 course=course,
-                video=video,
-                item_type="video"
-            ).first()
+                order__gt=module.order
+            ).order_by("order").first()
 
-            if module:
-                StudentContentProgress.objects.update_or_create(
+            if next_module:
+                StudentModuleUnlock.objects.update_or_create(
                     user=user,
-                    module=module,
-                    defaults={
-                        "is_completed": True,
-                        "completed_at": timezone.now()
-                    }
+                    module=next_module,
+                    defaults={"is_unlocked": True}
                 )
-
-                next_module = CourseModuleItem.objects.filter(
-                    course=course,
-                    order__gt=module.order
-                ).order_by("order").first()
-
-                if next_module:
-                    StudentModuleUnlock.objects.update_or_create(
-                        user=user,
-                        module=next_module,
-                        defaults={"is_unlocked": True}
-                    )
+            else:
+                # 🎯 LAST MODULE → COURSE COMPLETE
+                Enrollment.objects.filter(
+                    user=user,
+                    course=course
+                ).update(status="completed")
 
         progress.save()
 
         return Response({
             "video_id": video.id,
-            "course_id": course.id,
-            "duration": video.duration,
             "watched_seconds": progress.watched_seconds,
             "last_position": progress.last_position,
             "is_completed": progress.is_completed
         })
-    
-
-
-
 
 
 class CourseModuleProgressAPIView(APIView):

@@ -9,7 +9,7 @@ urlpatterns = [
     # =========================
     path("auth/signup/", views.SignupAPIView.as_view(), name="signup"),
     path("auth/login/", views.LoginAPIView.as_view(), name="login"),
-    path("auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
+    # path("auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("auth/me/", views.GetUserAPIView.as_view(), name="get-user"),
 
     # =========================
@@ -33,8 +33,11 @@ urlpatterns = [
     # =========================
     # VIDEO
     # =========================
-    path("videos/<int:video_id>/stream/", views.StreamVideoAPIView.as_view()),
-
+path(
+    "courses/<int:course_id>/videos/<int:video_id>/stream/",
+    views.StreamVideoAPIView.as_view(),
+    name="video-stream",
+),
 
 
     #update video progress and get video progress

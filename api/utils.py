@@ -1,7 +1,5 @@
-from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import landscape, A4
-from PyPDF2 import PdfReader, PdfWriter
-import io, os
+from docx import Document
+import os
 from django.conf import settings
 
 TEMPLATE_PATH = os.path.join(
@@ -9,42 +7,58 @@ TEMPLATE_PATH = os.path.join(
     "api",
     "static",
     "certificates",
-    "template.PDF"
+    "template.docx"
 )
 
-def generate_certificate(name):
+def replace_in_paragraph(paragraph, replacements):
+    full_text = paragraph.text
+    replaced = False
 
-    name = name.upper().strip()   # ⭐ UPPERCASE + remove extra spaces
+    for key, value in replacements.items():
+        if key in full_text:
+            full_text = full_text.replace(key, value)
+            replaced = True
 
-    # Create PDF in memory
-    packet = io.BytesIO()
-    c = canvas.Canvas(packet, pagesize=landscape(A4))
+    if replaced:
+        # ⚠️ Clear runs but keep paragraph formatting
+        for run in paragraph.runs:
+            run.text = ""
+        paragraph.add_run(full_text)
 
-    # FONT
-    c.setFont("Helvetica-Bold", 34)   # slightly bigger looks better
-    c.setFillColorRGB(0, 0, 0)
+def generate_certificate(
+    name,
+    title="Mr. ",
+    referal="WLX-TEST-001",
+    date="15-09-2024",
+    start_date="01-06-2024",
+    end_date="01-09-2024",
+):
+    doc = Document(TEMPLATE_PATH)
 
-    # POSITION (adjust until perfect)
-    x = 140
-    y = 315   # ⭐ Move slightly up to reduce gap
+    replacements = {
+        "{{Name}}": name.upper().strip(),
+        "{{tittle}}": title,   # keep same spelling as template
+        "{{referal}}": referal,
+        "{{date}}": date,
+        "{{start_date}}": start_date,
+        "{{end_date}}": end_date,
+    }
 
-    c.drawString(x, y, name)
-    c.save()
+    # ✅ Paragraphs
+    for paragraph in doc.paragraphs:
+        replace_in_paragraph(paragraph, replacements)
 
-    packet.seek(0)
+    # ✅ Tables
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for paragraph in cell.paragraphs:
+                    replace_in_paragraph(paragraph, replacements)
 
-    # Merge with template
-    name_layer = PdfReader(packet)
-    template_reader = PdfReader(open(TEMPLATE_PATH, "rb"))
+    output_path = os.path.join(
+        settings.MEDIA_ROOT,
+        f"certificate_{name.replace(' ', '_')}.docx"
+    )
 
-    output = PdfWriter()
-    page = template_reader.pages[0]
-    page.merge_page(name_layer.pages[0])
-    output.add_page(page)
-
-    # Output PDF path
-    output_path = os.path.join(settings.MEDIA_ROOT, f"certificate_{name}.pdf")
-    with open(output_path, "wb") as f:
-        output.write(f)
-
+    doc.save(output_path)
     return output_path
