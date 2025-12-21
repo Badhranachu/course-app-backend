@@ -1,14 +1,11 @@
 from pathlib import Path
 import os
-import ssl
 from dotenv import load_dotenv
 
 load_dotenv()
 
 import pymysql
 pymysql.install_as_MySQLdb()
-
-ssl._create_default_https_context = ssl._create_unverified_context
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -17,7 +14,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # -------------------------------------------------
 SECRET_KEY = os.getenv("SECRET_KEY")
 DEBUG = os.getenv("DEBUG", "False").lower() == "true"
-ALLOWED_HOSTS = ["*"]
+
+ALLOWED_HOSTS = [
+    "nexston.in",
+    "www.nexston.in",
+    "103.194.228.82",
+]
 
 # -------------------------------------------------
 # INSTALLED APPS
@@ -38,37 +40,6 @@ INSTALLED_APPS = [
 ]
 
 # -------------------------------------------------
-# STORAGE (Cloudflare R2)
-# -------------------------------------------------
-DEFAULT_STORAGE_ALIAS = "default"
-
-STORAGES = {
-    "default": {
-        "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
-    },
-    "staticfiles": {
-        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
-    },
-}
-
-AWS_S3_REGION_NAME = "auto"
-AWS_S3_SIGNATURE_VERSION = "s3v4"
-
-AWS_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
-AWS_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
-
-AWS_STORAGE_BUCKET_NAME = os.getenv("R2_BUCKET_NAME")
-AWS_S3_ENDPOINT_URL = f"https://{os.getenv('R2_ACCOUNT_ID')}.r2.cloudflarestorage.com"
-
-AWS_LOCATION = ""
-AWS_S3_FILE_OVERWRITE = False
-AWS_DEFAULT_ACL = None
-AWS_QUERYSTRING_AUTH = False
-
-MEDIA_URL = f"{os.getenv('R2_PUBLIC_URL')}/"
-
-
-# -------------------------------------------------
 # MIDDLEWARE
 # -------------------------------------------------
 MIDDLEWARE = [
@@ -83,6 +54,7 @@ MIDDLEWARE = [
 ]
 
 ROOT_URLCONF = 'bekola.urls'
+WSGI_APPLICATION = 'bekola.wsgi.application'
 
 # -------------------------------------------------
 # TEMPLATES
@@ -103,10 +75,8 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = 'bekola.wsgi.application'
-
 # -------------------------------------------------
-# DATABASE
+# DATABASE (MySQL)
 # -------------------------------------------------
 DATABASES = {
     'default': {
@@ -128,9 +98,38 @@ DATABASES = {
 # -------------------------------------------------
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+
+# (Create /static folder OR remove next line if unused)
 STATICFILES_DIRS = [BASE_DIR / 'static']
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# -------------------------------------------------
+# STORAGE (Cloudflare R2)
+# -------------------------------------------------
+DEFAULT_STORAGE_ALIAS = "default"
+
+STORAGES = {
+    "default": {
+        "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
+    },
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+    },
+}
+
+AWS_S3_REGION_NAME = "auto"
+AWS_S3_SIGNATURE_VERSION = "s3v4"
+AWS_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
+AWS_STORAGE_BUCKET_NAME = os.getenv("R2_BUCKET_NAME")
+AWS_S3_ENDPOINT_URL = f"https://{os.getenv('R2_ACCOUNT_ID')}.r2.cloudflarestorage.com"
+
+AWS_DEFAULT_ACL = None
+AWS_QUERYSTRING_AUTH = False
+AWS_S3_FILE_OVERWRITE = False
+
+MEDIA_URL = f"{os.getenv('R2_PUBLIC_URL')}/"
 
 # -------------------------------------------------
 # AUTH
@@ -143,7 +142,7 @@ AUTHENTICATION_BACKENDS = [
 ]
 
 # -------------------------------------------------
-# REST
+# REST FRAMEWORK
 # -------------------------------------------------
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
@@ -153,16 +152,35 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.IsAuthenticated',
     ],
 }
-AWS_LOCATION = ""
-
-AWS_S3_FILE_OVERWRITE = False
-
 
 # -------------------------------------------------
 # CORS
 # -------------------------------------------------
-CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOW_CREDENTIALS = True
+
+CORS_ALLOWED_ORIGINS = [
+    "https://nexston.in",
+    "https://www.nexston.in",
+]
+
+CSRF_TRUSTED_ORIGINS = [
+    "https://nexston.in",
+    "https://www.nexston.in",
+]
+
+# -------------------------------------------------
+# SECURITY (PRODUCTION)
+# -------------------------------------------------
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+SECURE_SSL_REDIRECT = True
+
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = True
+
+SECURE_BROWSER_XSS_FILTER = True
+SECURE_CONTENT_TYPE_NOSNIFF = True
+X_FRAME_OPTIONS = "DENY"
 
 # -------------------------------------------------
 # EMAIL
@@ -180,6 +198,3 @@ DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 # -------------------------------------------------
 RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID")
 RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET")
-
-
-##
