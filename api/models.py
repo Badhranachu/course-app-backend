@@ -14,6 +14,15 @@ from django.utils import timezone
 from moviepy.editor import VideoFileClip
 
 
+
+class MediaFile(models.Model):
+    title = models.CharField(max_length=255)
+    file = models.FileField(upload_to="uploads/")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.title
+
 # =====================================================
 # USER TOKEN
 # =====================================================

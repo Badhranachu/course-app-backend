@@ -1,9 +1,12 @@
-# backend/bekola/settings.py
-
 from pathlib import Path
-from datetime import timedelta
 import os
 import ssl
+from dotenv import load_dotenv
+
+load_dotenv()
+
+import pymysql
+pymysql.install_as_MySQLdb()
 
 ssl._create_default_https_context = ssl._create_unverified_context
 
@@ -12,10 +15,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # -------------------------------------------------
 # BASIC SETTINGS
 # -------------------------------------------------
-SECRET_KEY = 'django-insecure-bekola-dev-key-change-in-production'
-DEBUG = True
-
-ALLOWED_HOSTS = ['*']
+SECRET_KEY = os.getenv("SECRET_KEY")
+DEBUG = os.getenv("DEBUG", "False").lower() == "true"
+ALLOWED_HOSTS = ["*"]
 
 # -------------------------------------------------
 # INSTALLED APPS
@@ -28,19 +30,49 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
 
-    # Third-party
     'rest_framework',
     'corsheaders',
 
-    # Local
+    'storages',   # MUST be before api
     'api',
 ]
+
+# -------------------------------------------------
+# STORAGE (Cloudflare R2)
+# -------------------------------------------------
+DEFAULT_STORAGE_ALIAS = "default"
+
+STORAGES = {
+    "default": {
+        "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
+    },
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+    },
+}
+
+AWS_S3_REGION_NAME = "auto"
+AWS_S3_SIGNATURE_VERSION = "s3v4"
+
+AWS_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
+
+AWS_STORAGE_BUCKET_NAME = os.getenv("R2_BUCKET_NAME")
+AWS_S3_ENDPOINT_URL = f"https://{os.getenv('R2_ACCOUNT_ID')}.r2.cloudflarestorage.com"
+
+AWS_LOCATION = ""
+AWS_S3_FILE_OVERWRITE = False
+AWS_DEFAULT_ACL = None
+AWS_QUERYSTRING_AUTH = False
+
+MEDIA_URL = f"{os.getenv('R2_PUBLIC_URL')}/"
+
 
 # -------------------------------------------------
 # MIDDLEWARE
 # -------------------------------------------------
 MIDDLEWARE = [
-    'corsheaders.middleware.CorsMiddleware',  # MUST be first
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -78,56 +110,40 @@ WSGI_APPLICATION = 'bekola.wsgi.application'
 # -------------------------------------------------
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': os.getenv("DB_NAME"),
+        'USER': os.getenv("DB_USER"),
+        'PASSWORD': os.getenv("DB_PASSWORD"),
+        'HOST': os.getenv("DB_HOST"),
+        'PORT': os.getenv("DB_PORT"),
+        'OPTIONS': {
+            'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
+            'charset': 'utf8mb4',
+        },
     }
 }
 
 # -------------------------------------------------
-# PASSWORD VALIDATION
-# -------------------------------------------------
-AUTH_PASSWORD_VALIDATORS = [
-    {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
-    {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator'},
-    {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator'},
-    {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
-]
-
-# -------------------------------------------------
-# INTERNATIONALIZATION
-# -------------------------------------------------
-LANGUAGE_CODE = 'en-us'
-TIME_ZONE = 'UTC'
-USE_I18N = True
-USE_TZ = True
-
-# -------------------------------------------------
-# STATIC & MEDIA
+# STATIC FILES
 # -------------------------------------------------
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
-STATICFILES_DIRS = [BASE_DIR / "static"]
-
-MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
+STATICFILES_DIRS = [BASE_DIR / 'static']
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # -------------------------------------------------
-# CUSTOM USER MODEL
+# AUTH
 # -------------------------------------------------
 AUTH_USER_MODEL = "api.CustomUser"
 
-# -------------------------------------------------
-# AUTH BACKENDS (EMAIL LOGIN)
-# -------------------------------------------------
 AUTHENTICATION_BACKENDS = [
     'api.backends.EmailBackend',
     'django.contrib.auth.backends.ModelBackend',
 ]
 
 # -------------------------------------------------
-# REST FRAMEWORK (DB TOKEN AUTH)
+# REST
 # -------------------------------------------------
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
@@ -136,59 +152,34 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
     ],
-    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
-    'PAGE_SIZE': 10,
 }
+AWS_LOCATION = ""
+
+AWS_S3_FILE_OVERWRITE = False
+
 
 # -------------------------------------------------
-# VIDEO PROGRESS MODE
-# -------------------------------------------------
-VIDEO_PROGRESS_TEST_MODE = True  # set False in production
-
-# -------------------------------------------------
-# CORS CONFIG
+# CORS
 # -------------------------------------------------
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
 
-CORS_ALLOW_HEADERS = [
-    "content-type",
-    "authorization",
-    "accept",
-    "origin",
-    "user-agent",
-    "x-csrftoken",
-    "accept-encoding",
-    "range",
-]
-
-CORS_ALLOW_METHODS = [
-    "GET",
-    "POST",
-    "PUT",
-    "PATCH",
-    "DELETE",
-    "OPTIONS",
-]
-
-CORS_EXPOSE_HEADERS = [
-    "Content-Range",
-    "Accept-Ranges",
-]
-
 # -------------------------------------------------
-# EMAIL SETTINGS
+# EMAIL
 # -------------------------------------------------
 EMAIL_BACKEND = "api.custom_email_backend.UnverifiedSSLBackend"
 EMAIL_HOST = "smtp.gmail.com"
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
-EMAIL_HOST_USER = "dairiesofbadhran@gmail.com"
-EMAIL_HOST_PASSWORD = "dnjijwwhtxukdecz"
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
 DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 
 # -------------------------------------------------
-# RAZORPAY (OPTIONAL)
+# RAZORPAY
 # -------------------------------------------------
-RAZORPAY_KEY_ID = "rzp_test_RrATUAvT1J4mmj"
-RAZORPAY_KEY_SECRET = "CCLrGpxQ5GIy8agGbfd0Yae5"
+RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID")
+RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET")
+
+
+##
