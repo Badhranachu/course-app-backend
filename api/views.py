@@ -721,35 +721,33 @@ class AttachmentPreviewAPIView(APIView):
 
 
 
+import zipfile
+from io import BytesIO
+
 class AttachmentTreeAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, course_id, video_id):
-        video = get_object_or_404(
-            Video,
-            id=video_id,
-            course_id=course_id
-        )
+        video = get_object_or_404(Video, id=video_id, course_id=course_id)
 
-        # Enrollment check
         if not Enrollment.objects.filter(
             user=request.user,
             course_id=course_id,
             status="completed"
         ).exists():
-            return Response(
-                {"error": "You are not enrolled in this course"},
-                status=403
-            )
+            return Response({"error": "You are not enrolled"}, status=403)
 
         if not video.folder_attachment:
             return Response({"tree": {}})
 
-        zip_path = video.folder_attachment.path
-        if not zip_path.endswith(".zip"):
+        if not video.folder_attachment.name.lower().endswith(".zip"):
             return Response({"tree": {}})
 
-        with zipfile.ZipFile(zip_path, "r") as z:
+        # ✅ MUST OPEN FIRST (Cloudflare R2)
+        with video.folder_attachment.open("rb") as f:
+            zip_bytes = BytesIO(f.read())
+
+        with zipfile.ZipFile(zip_bytes, "r") as z:
             files = [f for f in z.namelist() if not f.endswith("/")]
 
         tree = {}
@@ -765,33 +763,30 @@ class AttachmentContentAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, course_id, video_id, file_path):
-        video = get_object_or_404(
-            Video,
-            id=video_id,
-            course_id=course_id
-        )
+        video = get_object_or_404(Video, id=video_id, course_id=course_id)
 
-        # Enrollment check
         if not Enrollment.objects.filter(
             user=request.user,
             course_id=course_id,
             status="completed"
         ).exists():
-            return Response(
-                {"error": "You are not enrolled in this course"},
-                status=403
-            )
+            return Response({"error": "You are not enrolled"}, status=403)
 
         if not video.folder_attachment:
             return Response({"content": ""})
 
         try:
-            with zipfile.ZipFile(video.folder_attachment.path, "r") as z:
+            with video.folder_attachment.open("rb") as f:
+                zip_bytes = BytesIO(f.read())
+
+            with zipfile.ZipFile(zip_bytes, "r") as z:
                 content = z.read(file_path).decode("utf-8", errors="ignore")
-        except Exception:
+
+        except Exception as e:
             content = "Unable to read file"
 
         return Response({"content": content})
+
 class CourseVideosAPIView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
