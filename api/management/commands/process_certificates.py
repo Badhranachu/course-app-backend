@@ -12,3 +12,6 @@ class Command(BaseCommand):
             delayed_transfer_and_email(precert.id)
 
         self.stdout.write("Certificate check completed")
+
+
+        
