@@ -145,6 +145,13 @@ path(
         views.CertificateDownloadAPIView.as_view(),
         name="certificate-download",
     ),
+    path("grow-with-us/", views.GrowWithUsView.as_view()),
+    path("announcements/", views.AnnouncementListAPIView.as_view()),
+    path("student/profile/", views.StudentProfileAPIView.as_view()),
+    path(
+    "student/enrollments/",
+    views.StudentEnrollmentListAPIView.as_view(),
+),
 
 
 

@@ -71,22 +71,52 @@ class LoginAPIView(APIView):
         email = request.data.get("email")
         password = request.data.get("password")
 
-        user = authenticate(email=email, password=password)
+        if not email or not password:
+            return Response(
+                {"error": "Email and password required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # ✅ normalize email
+        email = email.strip().lower()
+
+        user = authenticate(
+            request=request,
+            username=email,   # email is USERNAME_FIELD
+            password=password
+        )
+
         if not user:
-            return Response({"error": "Invalid credentials"}, status=401)
+            return Response(
+                {"error": "Invalid credentials"},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+
+        if not user.is_active:
+            return Response(
+                {"error": "Account is disabled"},
+                status=status.HTTP_403_FORBIDDEN
+            )
 
         token, _ = UserToken.objects.get_or_create(user=user)
         token.mark_used()
+
+        # 🔹 Name handling (safe)
+        name = None
+        if user.role == "student" and hasattr(user, "student_profile"):
+            name = user.student_profile.full_name
+        elif user.role == "admin" and hasattr(user, "admin_profile"):
+            name = user.admin_profile.full_name
 
         return Response({
             "token": token.token,
             "user": {
                 "id": user.id,
-                "email": user.email,
+                "email": user.email,  # already stored lowercase
                 "role": user.role,
+                "name": name,
             }
         })
-
 
 from api.models import EmailOTP
 import random
@@ -383,26 +413,21 @@ class VerifyPaymentAPIView(APIView):
 from django.http import FileResponse
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
+from django.http import StreamingHttpResponse
+from wsgiref.util import FileWrapper
+
 
 class StreamVideoAPIView(APIView):
-    authentication_classes = [UserTokenAuthentication]
-    permission_classes = [IsAuthenticated]
+    authentication_classes = []   # ❌ no auth
+    permission_classes = []       # ❌ no permission
 
     def get(self, request, course_id, video_id):
-        course = get_object_or_404(Course, id=course_id)
-        video = get_object_or_404(Video, id=video_id, course=course)
+        video = get_object_or_404(Video, id=video_id, course_id=course_id)
 
-        if not Enrollment.objects.filter(
-            user=request.user,
-            course=course,
-            status="completed"
-        ).exists():
-            return Response({"error": "Not enrolled"}, status=403)
+        file = video.video_file.open("rb")
 
-        video_file = video.video_file.open("rb")
-
-        response = FileResponse(
-            video_file,
+        response = StreamingHttpResponse(
+            FileWrapper(file),
             content_type="video/mp4"
         )
         response["Accept-Ranges"] = "bytes"
@@ -1376,3 +1401,156 @@ class CertificateDownloadAPIView(APIView):
             as_attachment=True,
             filename=f"{reference_number}.pdf",  # ✅ saved using reference number
         )
+
+
+    
+from django.conf import settings
+from django.core.mail import send_mail
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import AllowAny
+
+from .models import GrowWithUsLead
+from api.models import CustomUser
+class GrowWithUsView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+
+        full_name = request.data.get("full_name")
+        phone = request.data.get("phone")
+        email = request.data.get("email")
+
+        try:
+            # 1️⃣ Try to create lead
+            lead, created = GrowWithUsLead.objects.get_or_create(
+                email=email,          # PRIMARY uniqueness anchor
+                defaults={
+                    "full_name": full_name,
+                    "phone": phone,
+                }
+            )
+
+        except IntegrityError:
+            # Safety net (rare race condition)
+            return Response(
+                {
+                    "message": (
+                        "Your details are already present in our system. "
+                        "Our team will contact you shortly."
+                    )
+                },
+                status=200
+            )
+
+        # 2️⃣ If already exists → friendly message
+        if not created:
+            return Response(
+                {
+                    "message": (
+                        "Your details are already present in our system. "
+                        "Our team will contact you shortly."
+                    )
+                },
+                status=200
+            )
+
+        # 3️⃣ Send email ONLY if newly created
+        admin_emails = list(
+            CustomUser.objects.filter(
+                role="admin",
+                is_active=True
+            ).values_list("email", flat=True)
+        )
+
+        if admin_emails:
+            send_mail(
+                subject="New Grow With Us Contact Request",
+                message=f"""
+                A new user has submitted the Grow With Us form.
+
+                Name: {lead.full_name}
+                Phone: {lead.phone}
+                Email: {lead.email}
+
+                Status: {lead.status}
+                Submitted At: {lead.submitted_at}
+                """,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=admin_emails,
+                fail_silently=True,
+            )
+
+        return Response(
+            {"message": "Thank you! Our team will contact you soon."},
+            status=201
+        )
+    
+
+from api.models import Announcement
+from api.serializers import AnnouncementSerializer
+class AnnouncementListAPIView(APIView):
+    permission_classes = []  # students & public users can access
+
+    def get(self, request):
+        now = timezone.now()
+
+        announcements = Announcement.objects.filter(
+            is_active=True
+        ).filter(
+            # Direct announcements
+            announcement_type="direct"
+        ) | Announcement.objects.filter(
+            # Scheduled announcements whose time has passed
+            announcement_type="scheduled",
+            scheduled_at__lte=now
+        )
+
+        announcements = announcements.order_by("-created_at")
+
+        serializer = AnnouncementSerializer(announcements, many=True)
+        return Response(serializer.data)
+    
+
+from api.permissions import IsStudent
+from api.serializers import StudentProfileSerializer
+class StudentProfileAPIView(APIView):
+    permission_classes = [IsAuthenticated, IsStudent]
+
+    def get(self, request):
+        """
+        Get logged-in student's profile
+        """
+        profile = StudentProfile.objects.get(user=request.user)
+        serializer = StudentProfileSerializer(profile)
+        return Response(serializer.data)
+
+    def patch(self, request):
+        """
+        Update logged-in student's profile (partial)
+        """
+        profile = StudentProfile.objects.get(user=request.user)
+        serializer = StudentProfileSerializer(
+            profile,
+            data=request.data,
+            partial=True
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
+    
+
+from api.serializers import StudentEnrollmentSerializer
+class StudentEnrollmentListAPIView(APIView):
+    permission_classes = [IsAuthenticated, IsStudent]
+
+    def get(self, request):
+        """
+        Get all enrollments for logged-in student
+        """
+        enrollments = Enrollment.objects.filter(
+            user=request.user
+        ).select_related("course").order_by("-enrolled_at")
+
+        serializer = StudentEnrollmentSerializer(enrollments, many=True)
+        return Response(serializer.data)

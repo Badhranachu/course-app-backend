@@ -111,8 +111,8 @@ class AdminProfile(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="admin_profile")
     full_name = models.CharField(max_length=100)
     phone = models.CharField(max_length=15, blank=True)
-    linkedin_url = models.URLField(blank=True)
-    website_url = models.URLField(blank=True)
+    linkedin_url = models.URLField(blank=True,null=True)
+    website_url = models.URLField(blank=True,null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -428,3 +428,79 @@ class CertificateSequence(models.Model):
 
     def __str__(self):
         return f"Last Ref No: {self.last_number}"
+    
+
+
+class GrowWithUsLead(models.Model):
+
+    STATUS_CHOICES = [
+        ("pending", "Pending"),
+        ("contacted", "Contacted"),
+    ]
+
+    full_name = models.CharField(max_length=200, unique=True)
+    phone = models.CharField(max_length=20, unique=True)
+    email = models.EmailField(unique=True)
+
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default="pending"
+    )
+
+    submitted_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.full_name} ({self.status})"
+    
+
+
+class Announcement(models.Model):
+    TYPE_CHOICES = (
+        ("draft", "Draft"),
+        ("scheduled", "Scheduled"),
+        ("direct", "Direct"),
+    )
+
+    subject = models.CharField(max_length=200)
+    message = models.TextField()
+
+    announcement_type = models.CharField(
+        max_length=10,
+        choices=TYPE_CHOICES,
+        default="draft"
+    )
+
+    scheduled_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Required if type is scheduled"
+    )
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="announcements"
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    is_active = models.BooleanField(default=True)
+
+    def is_visible(self):
+        """
+        Determines whether students can see this announcement
+        """
+        if not self.is_active:
+            return False
+
+        if self.announcement_type == "direct":
+            return True
+
+        if self.announcement_type == "scheduled":
+            return self.scheduled_at and self.scheduled_at <= timezone.now()
+
+        return False  # draft
+
+    def __str__(self):
+        return f"{self.subject} ({self.announcement_type})"

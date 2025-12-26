@@ -30,11 +30,16 @@ class UserSignupSerializer(serializers.ModelSerializer):
         fields = ["email", "full_name", "gender", "password", "password2"]
 
     def validate(self, attrs):
+        # ✅ normalize email
+        attrs["email"] = attrs["email"].strip().lower()
+
+        # ✅ password match check
         if attrs["password"] != attrs["password2"]:
             raise serializers.ValidationError({
                 "password": ["Passwords do not match"]
             })
-        return attrs
+
+        return attrs  # ✅ REQUIRED
 
     def create(self, validated_data):
         full_name = validated_data.pop("full_name")
@@ -54,7 +59,6 @@ class UserSignupSerializer(serializers.ModelSerializer):
         )
 
         return user
-
 
 
 class VideoSerializer(serializers.ModelSerializer):
@@ -265,3 +269,73 @@ class StudentContentProgressSerializer(serializers.ModelSerializer):
     class Meta:
         model = StudentContentProgress
         fields = ['id', 'module', 'is_completed', 'completed_at']
+
+
+from api.models import Announcement
+class AnnouncementSerializer(serializers.ModelSerializer):
+    created_by = serializers.SerializerMethodField()
+
+
+    class Meta:
+        model = Announcement
+        fields = (
+            "id",
+            "subject",
+            "message",
+            "announcement_type",
+            "created_at",
+            "created_by"
+        )
+
+    def get_created_by(self, obj):
+        user = obj.created_by
+
+        # If AdminProfile exists, use full_name
+        if hasattr(user, "admin_profile"):
+            return user.admin_profile.full_name
+
+        # Fallbacks (safety)
+        return user.email
+    
+
+
+
+from api.models import StudentProfile
+
+class StudentProfileSerializer(serializers.ModelSerializer):
+    email = serializers.EmailField(source="user.email", read_only=True)
+
+    class Meta:
+        model = StudentProfile
+        fields = (
+            "email",
+            "full_name",
+            "phone",
+            "college_name",
+            "course_name",
+            "github_url",
+            "created_at",
+        )
+        read_only_fields = ("created_at","email")
+
+
+
+from api.models import Enrollment
+
+class StudentEnrollmentSerializer(serializers.ModelSerializer):
+    course_title = serializers.CharField(source="course.title", read_only=True)
+    payment_date = serializers.DateTimeField(
+        format="%d/%m/%Y",
+        read_only=True
+    )
+
+    class Meta:
+        model = Enrollment
+        fields = (
+            "course_title",
+            "status",
+            "payment_date",
+            "payment_method",
+            
+        )
+        read_only_fields = fields
