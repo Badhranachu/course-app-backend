@@ -2,15 +2,17 @@ from pathlib import Path
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+# -------------------------------------------------
+# LOAD ENV
+# -------------------------------------------------
+BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / ".env")
 
 import pymysql
 pymysql.install_as_MySQLdb()
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-
 # -------------------------------------------------
-# BASIC SETTINGS
+# BASIC SETTINGS (DEFINE FIRST)
 # -------------------------------------------------
 SECRET_KEY = os.getenv("SECRET_KEY")
 DEBUG = os.getenv("DEBUG", "False").lower() == "true"
@@ -19,96 +21,96 @@ ALLOWED_HOSTS = [
     "nexston.in",
     "www.nexston.in",
     "103.194.228.82",
+    "localhost",
+    "127.0.0.1",
 ]
 
 # -------------------------------------------------
-# INSTALLED APPS
+# APPLICATIONS
 # -------------------------------------------------
 INSTALLED_APPS = [
-    'django.contrib.admin',
-    'django.contrib.auth',
-    'django.contrib.contenttypes',
-    'django.contrib.sessions',
-    'django.contrib.messages',
-    'django.contrib.staticfiles',
+    "django.contrib.admin",
+    "django.contrib.auth",
+    "django.contrib.contenttypes",
+    "django.contrib.sessions",
+    "django.contrib.messages",
+    "django.contrib.staticfiles",
 
-    'rest_framework',
-    'corsheaders',
+    "rest_framework",
+    "corsheaders",
 
-    'storages',   # MUST be before api
-    'api',
+    "storages",   # MUST be before api
+    "api.apps.ApiConfig"
 ]
 
 # -------------------------------------------------
 # MIDDLEWARE
 # -------------------------------------------------
 MIDDLEWARE = [
-    'corsheaders.middleware.CorsMiddleware',
-    'django.middleware.security.SecurityMiddleware',
-    'django.contrib.sessions.middleware.SessionMiddleware',
-    'django.middleware.common.CommonMiddleware',
-    'django.middleware.csrf.CsrfViewMiddleware',
-    'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'django.contrib.messages.middleware.MessageMiddleware',
-    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    "corsheaders.middleware.CorsMiddleware",
+    "django.middleware.security.SecurityMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.common.CommonMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
-ROOT_URLCONF = 'bekola.urls'
-WSGI_APPLICATION = 'bekola.wsgi.application'
+ROOT_URLCONF = "bekola.urls"
+WSGI_APPLICATION = "bekola.wsgi.application"
 
 # -------------------------------------------------
 # TEMPLATES
 # -------------------------------------------------
 TEMPLATES = [
     {
-        'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
-        'APP_DIRS': True,
-        'OPTIONS': {
-            'context_processors': [
-                'django.template.context_processors.debug',
-                'django.template.context_processors.request',
-                'django.contrib.auth.context_processors.auth',
-                'django.contrib.messages.context_processors.messages',
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "DIRS": [],
+        "APP_DIRS": True,
+        "OPTIONS": {
+            "context_processors": [
+                "django.template.context_processors.debug",
+                "django.template.context_processors.request",
+                "django.contrib.auth.context_processors.auth",
+                "django.contrib.messages.context_processors.messages",
             ],
         },
     },
 ]
 
 # -------------------------------------------------
-# DATABASE (MySQL)
+# DATABASE
 # -------------------------------------------------
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.mysql',
-        'NAME': os.getenv("DB_NAME"),
-        'USER': os.getenv("DB_USER"),
-        'PASSWORD': os.getenv("DB_PASSWORD"),
-        'HOST': os.getenv("DB_HOST"),
-        'PORT': os.getenv("DB_PORT"),
-        'OPTIONS': {
-            'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
-            'charset': 'utf8mb4',
+    "default": {
+        "ENGINE": "django.db.backends.mysql",
+        "NAME": os.getenv("DB_NAME"),
+        "USER": os.getenv("DB_USER"),
+        "PASSWORD": os.getenv("DB_PASSWORD"),
+        "HOST": os.getenv("DB_HOST"),
+        "PORT": os.getenv("DB_PORT"),
+        "OPTIONS": {
+            "init_command": "SET sql_mode='STRICT_TRANS_TABLES'",
+            "charset": "utf8mb4",
         },
     }
 }
 
 # -------------------------------------------------
-# STATIC FILES
+# STATIC & MEDIA
 # -------------------------------------------------
-STATIC_URL = '/static/'
-STATIC_ROOT = BASE_DIR / 'staticfiles'
+STATIC_URL = "/static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+STATICFILES_DIRS = [BASE_DIR / "static"]
 
-# (Create /static folder OR remove next line if unused)
-STATICFILES_DIRS = [BASE_DIR / 'static']
+MEDIA_URL = f"{os.getenv('R2_PUBLIC_URL')}/"
 
-DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # -------------------------------------------------
-# STORAGE (Cloudflare R2)
+# STORAGE (CLOUDFLARE R2)
 # -------------------------------------------------
-DEFAULT_STORAGE_ALIAS = "default"
-
 STORAGES = {
     "default": {
         "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
@@ -124,12 +126,9 @@ AWS_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
 AWS_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
 AWS_STORAGE_BUCKET_NAME = os.getenv("R2_BUCKET_NAME")
 AWS_S3_ENDPOINT_URL = f"https://{os.getenv('R2_ACCOUNT_ID')}.r2.cloudflarestorage.com"
-
 AWS_DEFAULT_ACL = None
 AWS_QUERYSTRING_AUTH = False
 AWS_S3_FILE_OVERWRITE = False
-
-MEDIA_URL = f"{os.getenv('R2_PUBLIC_URL')}/"
 
 # -------------------------------------------------
 # AUTH
@@ -137,24 +136,24 @@ MEDIA_URL = f"{os.getenv('R2_PUBLIC_URL')}/"
 AUTH_USER_MODEL = "api.CustomUser"
 
 AUTHENTICATION_BACKENDS = [
-    'api.backends.EmailBackend',
-    'django.contrib.auth.backends.ModelBackend',
+    "api.backends.EmailBackend",
+    "django.contrib.auth.backends.ModelBackend",
 ]
 
 # -------------------------------------------------
 # REST FRAMEWORK
 # -------------------------------------------------
 REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': [
-        'api.authentication.UserTokenAuthentication',
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "api.authentication.UserTokenAuthentication",
     ],
-    'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.IsAuthenticated',
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
     ],
 }
 
 # -------------------------------------------------
-# CORS
+# CORS & CSRF
 # -------------------------------------------------
 CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOW_CREDENTIALS = True
@@ -170,17 +169,26 @@ CSRF_TRUSTED_ORIGINS = [
 ]
 
 # -------------------------------------------------
-# SECURITY (PRODUCTION)
+# SECURITY (ENV-AWARE — THIS IS THE FIX)
 # -------------------------------------------------
-SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
-SECURE_SSL_REDIRECT = True
+if not DEBUG:
+    # 🔐 PRODUCTION ONLY
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SECURE_SSL_REDIRECT = True
 
-SESSION_COOKIE_SECURE = True
-CSRF_COOKIE_SECURE = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
 
-SECURE_BROWSER_XSS_FILTER = True
-SECURE_CONTENT_TYPE_NOSNIFF = True
-X_FRAME_OPTIONS = "DENY"
+    SECURE_BROWSER_XSS_FILTER = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    X_FRAME_OPTIONS = "DENY"
+else:
+    # 🧪 LOCAL DEVELOPMENT
+    SECURE_PROXY_SSL_HEADER = None
+    SECURE_SSL_REDIRECT = False
+
+    SESSION_COOKIE_SECURE = False
+    CSRF_COOKIE_SECURE = False
 
 # -------------------------------------------------
 # EMAIL
@@ -198,3 +206,8 @@ DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 # -------------------------------------------------
 RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID")
 RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET")
+
+
+
+USE_TZ = False
+TIME_ZONE = "Asia/Kolkata"

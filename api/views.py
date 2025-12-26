@@ -87,6 +87,58 @@ class LoginAPIView(APIView):
             }
         })
 
+
+from api.models import EmailOTP
+import random
+from api.utils import send_otp_email
+
+
+class SendEmailOTPAPIView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        email = request.data.get("email")
+
+        if not email:
+            return Response({"error": "Email required"}, status=400)
+
+        otp = str(random.randint(100000, 999999))
+
+        obj, _ = EmailOTP.objects.update_or_create(
+            email=email,
+            defaults={"otp": otp, "is_verified": False}
+        )
+
+        send_otp_email(email, otp)
+
+        return Response({"message": "OTP sent successfully"}, status=200)
+    
+
+
+class VerifyEmailOTPAPIView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        email = request.data.get("email")
+        otp = request.data.get("otp")
+
+        try:
+            record = EmailOTP.objects.get(email=email)
+
+            if record.is_expired():
+                return Response({"error": "OTP expired"}, status=400)
+
+            if record.otp != otp:
+                return Response({"error": "Invalid OTP"}, status=400)
+
+            record.is_verified = True
+            record.save()
+
+            return Response({"message": "Email verified"}, status=200)
+
+        except EmailOTP.DoesNotExist:
+            return Response({"error": "OTP not found"}, status=404)
+    
 class GetUserAPIView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -294,9 +346,20 @@ class VerifyPaymentAPIView(APIView):
             "razorpay_signature": request.data.get("razorpay_signature"),
         }
 
+        # ✅ Verify signature
         razorpay_client.utility.verify_payment_signature(params)
 
-        course = get_object_or_404(Course, id=request.data.get("course_id"))
+        # ✅ Fetch payment details (to get method)
+        payment = razorpay_client.payment.fetch(
+            params["razorpay_payment_id"]
+        )
+
+        payment_method = payment.get("method", "unknown")
+
+        course = get_object_or_404(
+            Course,
+            id=request.data.get("course_id")
+        )
 
         Enrollment.objects.create(
             user=request.user,
@@ -304,76 +367,48 @@ class VerifyPaymentAPIView(APIView):
             status="completed",
             razorpay_order_id=params["razorpay_order_id"],
             razorpay_payment_id=params["razorpay_payment_id"],
+            payment_method=payment_method,
+            payment_date=timezone.now(),  # ✅ stored here
         )
 
-        return Response({"message": "Enrollment successful"})
+        return Response({
+            "message": "Enrollment successful",
+            "payment_method": payment_method
+        })
 
 # ============================================================
 # VIDEO STREAM
 # ============================================================
 
+from django.http import FileResponse
+from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated
+
 class StreamVideoAPIView(APIView):
     authentication_classes = [UserTokenAuthentication]
     permission_classes = [IsAuthenticated]
 
-    def head(self, request, course_id, video_id):
-        return self.get(request, course_id, video_id)
-
     def get(self, request, course_id, video_id):
-        user = request.user
-
-        # 1️⃣ Validate course
         course = get_object_or_404(Course, id=course_id)
-
-        # 2️⃣ Validate video belongs to course
         video = get_object_or_404(Video, id=video_id, course=course)
 
-        # 3️⃣ Enrollment check
         if not Enrollment.objects.filter(
-            user=user,
+            user=request.user,
             course=course,
             status="completed"
         ).exists():
-            return Response(
-                {"error": "You are not enrolled in this course"},
-                status=403
-            )
+            return Response({"error": "Not enrolled"}, status=403)
 
-        video_path = video.video_file.path
-        file_size = os.path.getsize(video_path)
-        range_header = request.headers.get("Range")
+        video_file = video.video_file.open("rb")
 
-        # ===============================
-        # PARTIAL CONTENT (SEEKING)
-        # ===============================
-        if range_header:
-            start, end = range_header.replace("bytes=", "").split("-")
-            start = int(start)
-            end = int(end) if end else file_size - 1
-
-            with open(video_path, "rb") as f:
-                f.seek(start)
-                data = f.read(end - start + 1)
-
-            response = HttpResponse(data, status=206)
-            response["Content-Type"] = "video/mp4"
-            response["Accept-Ranges"] = "bytes"
-            response["Content-Range"] = f"bytes {start}-{end}/{file_size}"
-            response["Content-Length"] = str(end - start + 1)
-            response["Cache-Control"] = "no-store"
-            return response
-
-        # ===============================
-        # FULL STREAM
-        # ===============================
         response = FileResponse(
-            open(video_path, "rb"),
+            video_file,
             content_type="video/mp4"
         )
         response["Accept-Ranges"] = "bytes"
         response["Cache-Control"] = "no-store"
-        return response
 
+        return response
 # ============================================================
 # TEST SYSTEM
 # ============================================================
@@ -790,64 +825,43 @@ from django.core.mail import EmailMessage
 from api.utils import generate_certificate
 from django.conf import settings
 from .models import Certificate, Course
+import traceback
 
 
-def delayed_transfer_and_email(precert_id):
-    time.sleep(0)
+import os
+import logging
+from django.conf import settings
+from django.core.mail import EmailMessage
+from django.core.files.storage import default_storage
+from django.db import transaction
 
-    try:
-        precert = PreCertificate.objects.select_related(
-            "user",
-            "course"
-        ).get(id=precert_id)
-    except PreCertificate.DoesNotExist:
-        return
+from api.models import (
+    PreCertificate,
+    Certificate,
+    StudentProfile,
+)
+from django.core.files.base import ContentFile   # ✅ REQUIRED
+from datetime import timedelta
 
-    user = precert.user
-    course = precert.course
-    cert_path = precert.certificate_file.path
 
-    # ✅ ALWAYS AVAILABLE NAME
-    name = user.student_profile.full_name
-
-    # Save to Certificate
-    Certificate.objects.update_or_create(
-        user=user,
-        course=course,
-        defaults={
-            "github_link": precert.github_link,
-            "certificate_file": precert.certificate_file.name
-        }
-    )
-
-    # Send email
-    email = EmailMessage(
-        subject=f"Certificate for {course.title}",
-        body=(
-            f"Hi {name},\n\n"
-            f"Your certificate for completing the course "
-            f"'{course.title}' is attached.\n\n"
-            f"Regards,\nBekola Technical Solutions"
-        ),
-        from_email=settings.DEFAULT_FROM_EMAIL,
-        to=[user.email],
-    )
-
-    email.attach_file(cert_path)
-    email.send(fail_silently=True)
-
-    precert.delete()
 
 
 from django.core.files import File
-from api.models import PreCertificate
+from api.models import PreCertificate,StudentProfile
+import logging
+logger = logging.getLogger(__name__)
+from api.utils import delayed_transfer_and_email
+
+
 class SaveGithubLinkAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
+    # ------------------------------
+    # GET STATUS
+    # ------------------------------
     def get(self, request, course_id):
         course = get_object_or_404(Course, id=course_id)
 
-        # 1️⃣ Certificate already generated
         cert = Certificate.objects.filter(
             user=request.user,
             course=course
@@ -856,11 +870,10 @@ class SaveGithubLinkAPIView(APIView):
         if cert:
             return Response({
                 "completed": True,
-                "github_link": cert.github_link if hasattr(cert, "github_link") else None,
+                "github_link": cert.github_link,
                 "certificate_generated": True
             }, status=200)
 
-        # 2️⃣ Certificate request pending
         precert = PreCertificate.objects.filter(
             user=request.user,
             course=course
@@ -873,77 +886,86 @@ class SaveGithubLinkAPIView(APIView):
                 "certificate_generated": False
             }, status=200)
 
-        # 3️⃣ Nothing submitted
-        return Response({
-            "completed": False
-        }, status=200)
+        return Response({"completed": False}, status=200)
+
+    # ------------------------------
+    # POST SUBMISSION
+    # ------------------------------
+    permission_classes = [IsAuthenticated]
 
     def post(self, request, course_id):
         course = get_object_or_404(Course, id=course_id)
 
-        # 1️⃣ Enrollment check
-        if not Enrollment.objects.filter(
-            user=request.user,
-            course=course,
-            status="completed"
-        ).exists():
-            return Response(
-                {"error": "You are not enrolled in this course"},
-                status=status.HTTP_403_FORBIDDEN
+        # must be completed enrollment
+        try:
+            enrollment = Enrollment.objects.get(
+                user=request.user,
+                course=course,
+                status="completed"
             )
+        except Enrollment.DoesNotExist:
+            return Response({"error": "Not enrolled"}, status=403)
 
-        # 2️⃣ BLOCK if certificate already issued
+        # prevent duplicate final certificate
         if Certificate.objects.filter(
-            user=request.user,
-            course=course
+            user=request.user, course=course
         ).exists():
             return Response(
-                {"error": "Certificate already generated for this course"},
-                status=status.HTTP_400_BAD_REQUEST
+                {"error": "Certificate already generated"},
+                status=400
             )
 
-        # 3️⃣ BLOCK if request already pending
-        if PreCertificate.objects.filter(
-            user=request.user,
-            course=course
-        ).exists():
-            return Response(
-                {"error": "Certificate request already submitted"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # 4️⃣ Validate GitHub link
         github_link = request.data.get("github_link")
         if not github_link:
             return Response(
-                {"error": "Github link is required"},
-                status=status.HTTP_400_BAD_REQUEST
+                {"error": "Github link required"},
+                status=400
             )
 
-        # 5️⃣ Generate certificate
-        name = request.user.student_profile.full_name
-        cert_path = generate_certificate(name)
+        # generate certificate locally
+        cert_path, _ = generate_certificate(
+            user=request.user,
+            course=course
+        )
 
-        # 6️⃣ Save PreCertificate
-        with open(cert_path, "rb") as f:
-            precert = PreCertificate.objects.create(
-                user=request.user,
-                course=course,
-                github_link=github_link,
-                certificate_file=File(f, os.path.basename(cert_path))
+        try:
+            with open(cert_path, "rb") as f:
+                with transaction.atomic():
+                    precert, _ = PreCertificate.objects.update_or_create(
+                        user=request.user,
+                        course=course,
+                        defaults={
+                            "github_link": github_link,
+                            "certificate_file": File(
+                                f,
+                                f"pre_certificates/{os.path.basename(cert_path)}"
+                            ),
+                        },
+                    )
+        except Exception:
+            logger.exception("PreCertificate creation failed")
+            return Response(
+                {"error": "Failed"},
+                status=500
             )
 
-        # 7️⃣ Background processing
-        threading.Thread(
-            target=delayed_transfer_and_email,
-            args=(precert.id,),
-            daemon=True
-        ).start()
+        # 🔥 NEW LOGIC: IMMEDIATE ELIGIBILITY CHECK
+        from api.utils import delayed_transfer_and_email
+        delayed_transfer_and_email(precert.id)
 
         return Response(
-            {"message": "Github link submitted successfully. Certificate will be emailed."},
-            status=status.HTTP_200_OK
+            {
+                "message": (
+                    "Github link saved. "
+                    "If eligible, certificate has been emailed."
+                )
+            },
+            status=200,
         )
+    
+from django.db import IntegrityError
+from django.db import transaction
+
 
 
 class GetGithubLinkAPIView(APIView):
@@ -1075,33 +1097,24 @@ MAX_FORWARD_SKIP = 1800  # ✅ 30 minutes (in seconds)
 class UpdateVideoProgressAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
-
+    # ==============================
+    # GET → FETCH PROGRESS
+    # ==============================
     def get(self, request, course_id):
         user = request.user
-
-        # 1️⃣ Validate course
         course = get_object_or_404(Course, id=course_id)
 
-        # 2️⃣ Enrollment check
         if not Enrollment.objects.filter(
-            user=user,
-            course=course,
-            status="completed"
+            user=user, course=course
         ).exists():
-            return Response(
-                {"error": "You are not enrolled in this course"},
-                status=403
-            )
+            return Response({"error": "Not enrolled"}, status=403)
 
-        # 3️⃣ Fetch videos
         videos = Video.objects.filter(course=course)
-
         response = []
 
         for video in videos:
             progress = StudentVideoProgress.objects.filter(
-                user=user,
-                video=video
+                user=user, video=video
             ).first()
 
             watched = progress.watched_seconds if progress else 0
@@ -1109,7 +1122,7 @@ class UpdateVideoProgressAPIView(APIView):
 
             percentage = (
                 int((watched / video.duration) * 100)
-                if video.duration and watched
+                if video.duration > 0
                 else 0
             )
 
@@ -1120,20 +1133,25 @@ class UpdateVideoProgressAPIView(APIView):
                 "watched_seconds": watched,
                 "progress_percent": percentage,
                 "last_position": progress.last_position if progress else 0,
-                "is_completed": completed
+                "is_completed": completed,
             })
 
         return Response(response)
 
+    # ==============================
+    # POST → UPDATE PROGRESS
+    # ==============================
     def post(self, request, course_id):
         user = request.user
-        video_id = request.data.get("video_id")
-        current_time = int(request.data.get("current_time", 0))
 
-        # 1️⃣ Course
+        video_id = request.data.get("video_id")
+        current_time = request.data.get("current_time")
+
+        # 🔒 HARD SAFETY DEFAULT
+        current_time = int(current_time) if current_time is not None else 0
+
         course = get_object_or_404(Course, id=course_id)
 
-        # 2️⃣ Enrollment
         if not Enrollment.objects.filter(
             user=user,
             course=course,
@@ -1141,10 +1159,8 @@ class UpdateVideoProgressAPIView(APIView):
         ).exists():
             return Response({"error": "Not enrolled"}, status=403)
 
-        # 3️⃣ Video
         video = get_object_or_404(Video, id=video_id, course=course)
 
-        # 4️⃣ Module (VERY IMPORTANT)
         module = get_object_or_404(
             CourseModuleItem,
             course=course,
@@ -1152,28 +1168,43 @@ class UpdateVideoProgressAPIView(APIView):
             item_type="video"
         )
 
-        # 5️⃣ Video progress
         progress, _ = StudentVideoProgress.objects.get_or_create(
             user=user,
-            video=video
+            video=video,
+            defaults={
+                "watched_seconds": 0,
+                "last_position": 0,
+                "is_completed": False,
+            }
         )
 
-        # 6️⃣ Sync progress (allow jump)
-        if video.duration:
-            progress.last_position = min(max(progress.last_position, current_time), video.duration)
-            progress.watched_seconds = min(max(progress.watched_seconds, current_time), video.duration)
+        # 🔥 HARD NULL SAFETY (CRITICAL)
+        if progress.watched_seconds is None:
+            progress.watched_seconds = 0
 
-        # 7️⃣ Completion check (90%)
+        if progress.last_position is None:
+            progress.last_position = 0
+
+        # ==============================
+        # 🔒 SAFE SYNC (NO NULLS)
+        # ==============================
+        if video.duration:
+            capped_time = min(current_time, video.duration)
+
+            progress.last_position = max(progress.last_position or 0, capped_time)
+            progress.watched_seconds = max(progress.watched_seconds or 0, capped_time)
+
+        # ==============================
+        # ✅ COMPLETION CHECK (90%)
+        # ==============================
         completion_threshold = int(video.duration * 0.9) if video.duration else 0
 
         if not progress.is_completed and progress.watched_seconds >= completion_threshold:
-            # ✅ VIDEO COMPLETED
             progress.is_completed = True
             progress.completed_at = timezone.now()
             progress.last_position = video.duration
             progress.watched_seconds = video.duration
 
-            # ✅ MODULE COMPLETED (FIRST)
             StudentContentProgress.objects.update_or_create(
                 user=user,
                 module=module,
@@ -1183,7 +1214,6 @@ class UpdateVideoProgressAPIView(APIView):
                 }
             )
 
-            # ✅ UNLOCK NEXT MODULE
             next_module = CourseModuleItem.objects.filter(
                 course=course,
                 order__gt=module.order
@@ -1196,7 +1226,6 @@ class UpdateVideoProgressAPIView(APIView):
                     defaults={"is_unlocked": True}
                 )
             else:
-                # 🎯 LAST MODULE → COURSE COMPLETE
                 Enrollment.objects.filter(
                     user=user,
                     course=course

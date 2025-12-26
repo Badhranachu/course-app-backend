@@ -20,10 +20,14 @@ class UserSignupSerializer(serializers.ModelSerializer):
     )
     password2 = serializers.CharField(write_only=True)
     full_name = serializers.CharField(write_only=True)
+    gender = serializers.ChoiceField(
+        choices=[("male", "Male"), ("female", "Female")],
+        write_only=True
+    )
 
     class Meta:
         model = CustomUser
-        fields = ["email", "full_name", "password", "password2"]
+        fields = ["email", "full_name", "gender", "password", "password2"]
 
     def validate(self, attrs):
         if attrs["password"] != attrs["password2"]:
@@ -34,19 +38,19 @@ class UserSignupSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         full_name = validated_data.pop("full_name")
+        gender = validated_data.pop("gender")
         validated_data.pop("password2")
 
-        # 1️⃣ Create user (FORCE student role)
         user = CustomUser.objects.create_user(
             email=validated_data["email"],
             password=validated_data["password"],
-            role="student"  # 🔒 always student
+            role="student"
         )
 
-        # 2️⃣ Create student profile
         StudentProfile.objects.create(
             user=user,
-            full_name=full_name
+            full_name=full_name,
+            gender=gender
         )
 
         return user

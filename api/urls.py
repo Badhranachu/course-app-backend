@@ -7,6 +7,8 @@ urlpatterns = [
     # =========================
     # AUTH
     # =========================
+    path("auth/send-otp/", views.SendEmailOTPAPIView.as_view()),
+    path("auth/verify-otp/", views.VerifyEmailOTPAPIView.as_view()),
     path("auth/signup/", views.SignupAPIView.as_view(), name="signup"),
     path("auth/login/", views.LoginAPIView.as_view(), name="login"),
     # path("auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),

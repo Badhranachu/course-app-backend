@@ -120,6 +120,14 @@ class AdminProfile(models.Model):
 
 
 class StudentProfile(models.Model):
+    GENDER_CHOICES = (
+        ("male", "Male"),
+        ("female", "Female"),
+    )
+    gender = models.CharField(
+        max_length=10,
+        choices=GENDER_CHOICES
+    )
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="student_profile")
     full_name = models.CharField(max_length=100)
     phone = models.CharField(max_length=15, blank=True)
@@ -183,14 +191,49 @@ class Video(models.Model):
 # ENROLLMENT
 # =====================================================
 
-class Enrollment(models.Model):
-    STATUS_CHOICES = [('pending', 'Pending'), ('completed', 'Completed')]
+# api/models.py
 
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='enrollments')
-    course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name='enrollments')
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+class Enrollment(models.Model):
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('completed', 'Completed'),
+    ]
+
+    PAYMENT_METHOD_CHOICES = [
+        ('upi', 'UPI'),
+        ('card', 'Card'),
+        ('netbanking', 'Net Banking'),
+        ('wallet', 'Wallet'),
+        ('unknown', 'Unknown'),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='enrollments'
+    )
+    course = models.ForeignKey(
+        Course,
+        on_delete=models.CASCADE,
+        related_name='enrollments'
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='pending'
+    )
 
     enrolled_at = models.DateTimeField(auto_now_add=True)
+
+    # ✅ NEW FIELDS
+    payment_date = models.DateTimeField(null=True, blank=True)
+    payment_method = models.CharField(
+        max_length=20,
+        choices=PAYMENT_METHOD_CHOICES,
+        default='unknown'
+    )
+
     razorpay_order_id = models.CharField(max_length=255, blank=True)
     razorpay_payment_id = models.CharField(max_length=255, blank=True)
 
@@ -203,6 +246,7 @@ class Enrollment(models.Model):
         except Exception:
             name = self.user.email
         return f"{name} → {self.course.title} ({self.status})"
+
 
 
 # =====================================================
@@ -340,17 +384,16 @@ class StudentContentProgress(models.Model):
 class StudentVideoProgress(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     video = models.ForeignKey(Video, on_delete=models.CASCADE)
+
     watched_seconds = models.PositiveIntegerField(default=0)
     last_position = models.PositiveIntegerField(default=0)
+
     is_completed = models.BooleanField(default=False)
     completed_at = models.DateTimeField(null=True, blank=True)
-    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         unique_together = ("user", "video")
 
-    def __str__(self):
-        return f"{self.user.email} → {self.video.title} ({self.watched_seconds}s)"
 
 
 class StudentModuleUnlock(models.Model):
@@ -364,3 +407,22 @@ class StudentModuleUnlock(models.Model):
 
     def __str__(self):
         return f"{self.user.email} → Module #{self.module.order} (unlocked)"
+
+
+
+class EmailOTP(models.Model):
+    email = models.EmailField(unique=True)
+    otp = models.CharField(max_length=6)
+    is_verified = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now=True)
+
+    def is_expired(self):
+        return timezone.now() > self.created_at + timezone.timedelta(minutes=5)
+    
+
+
+class CertificateSequence(models.Model):
+    last_number = models.PositiveIntegerField(default=0)
+
+    def __str__(self):
+        return f"Last Ref No: {self.last_number}"
