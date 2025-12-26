@@ -331,6 +331,7 @@ def delayed_transfer_and_email(precert_id):
             defaults={
                 "github_link": precert.github_link,
                 "certificate_file": new_path,
+                "reference_number": precert.reference_number,  # ✅ FINAL SAVE
             },
         )
 

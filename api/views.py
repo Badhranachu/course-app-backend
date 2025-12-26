@@ -918,7 +918,7 @@ class SaveGithubLinkAPIView(APIView):
             )
 
         # generate certificate locally
-        cert_path, _ = generate_certificate(
+        cert_path, ref_no = generate_certificate(
             user=request.user,
             course=course
         )
@@ -931,9 +931,10 @@ class SaveGithubLinkAPIView(APIView):
                         course=course,
                         defaults={
                             "github_link": github_link,
+                            "reference_number": ref_no,
                             "certificate_file": File(
                                 f,
-                                f"pre_certificates/{os.path.basename(cert_path)}"
+                                f"{os.path.basename(cert_path)}"
                             ),
                         },
                     )

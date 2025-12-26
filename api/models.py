@@ -335,6 +335,7 @@ class StudentAnswer(models.Model):
 class Certificate(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     course = models.ForeignKey(Course, on_delete=models.CASCADE)
+    reference_number = models.CharField(max_length=50, null=True, blank=True)  # ✅ NEW
     certificate_file = models.FileField(upload_to="certificates/", null=True, blank=True)
     github_link = models.CharField(max_length=500, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -353,6 +354,7 @@ class Certificate(models.Model):
 class PreCertificate(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     course = models.ForeignKey(Course, on_delete=models.CASCADE)
+    reference_number = models.CharField(max_length=50, null=True, blank=True)  # ✅ NEW
     certificate_file = models.FileField(upload_to="pre_certificates/", null=True, blank=True)
     github_link = models.CharField(max_length=500, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
