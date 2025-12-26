@@ -6,21 +6,38 @@ import os
 from django.conf import settings
 from django.utils import timezone
 from datetime import timedelta
-from docx2pdf  import convert 
 
 import pythoncom
+import reportlab
+from api.models import CertificateSequence
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import inch
+from textwrap import wrap
 
-from api.models import Enrollment, CertificateSequence, StudentProfile
-def convert_docx_to_pdf(docx_path, pdf_path):
+def draw_paragraph(c, text, x, y, max_width, font="Helvetica", size=12, leading=18):
     """
-    Safely convert DOCX → PDF using Word (Windows only)
+    Draw a wrapped paragraph within given width.
+    Returns new Y position after drawing.
     """
-    pythoncom.CoInitialize()
-    try:
-        convert(docx_path, pdf_path)
-    finally:
-        pythoncom.CoUninitialize()
+    c.setFont(font, size)
+    text_obj = c.beginText(x, y)
+    text_obj.setLeading(leading)
 
+    # Approx chars per line (stable for certificates)
+    max_chars = int(max_width / (size * 0.55))
+    lines = wrap(text, max_chars)
+
+    for line in lines:
+        text_obj.textLine(line)
+
+    c.drawText(text_obj)
+    return y - leading * (len(lines) + 1)
+
+
+# =====================================================
+# MAIN CERTIFICATE GENERATOR
+# =====================================================
 def generate_certificate(*, user, course):
 
     # ===============================
@@ -53,81 +70,101 @@ def generate_certificate(*, user, course):
     ref_no = f"NEX/INT/2025/{str(seq.last_number).zfill(2)}"
 
     # ===============================
-    # LOAD TEMPLATE
-    # ===============================
-    template_path = os.path.join(
-        settings.BASE_DIR,
-        "api",
-        "static",
-        "certificates",
-        "template.docx"
-    )
-
-    doc = Document(template_path)
-
-    def add_paragraph(text, bold=False, size=12):
-        p = doc.add_paragraph()
-        run = p.add_run(text)
-        run.bold = bold
-        run.font.size = Pt(size)
-        return p
-
-    # ===============================
-    # CERTIFICATE CONTENT
-    # ===============================
-    add_paragraph(f"Date: {today}", size=11)
-    add_paragraph(f"Ref: {ref_no}", size=11)
-
-    add_paragraph("")
-    add_paragraph("TO WHOMSOEVER IT MAY CONCERN", bold=True, size=14)
-    add_paragraph("")
-
-    add_paragraph(
-        f"This is to certify that {title}{name} has successfully completed "
-        f"his internship program in {course.title} from "
-        f"{start_date.strftime('%d %B %Y')} to {end_date.strftime('%d %B %Y')} "
-        f"at Walnex.",
-        size=12
-    )
-
-    add_paragraph("")
-    add_paragraph(
-        "During the internship period, we found him to be extremely inquisitive, "
-        "hardworking, and disciplined. He demonstrated strong interest and curiosity "
-        "in understanding the functions of our core development process and consistently "
-        "put in dedicated effort. He showed willingness to dive deep into both backend "
-        "and frontend concepts to strengthen his practical understanding.",
-        size=12
-    )
-
-    add_paragraph("")
-    add_paragraph(
-        "We appreciate his enthusiasm and commitment throughout the internship "
-        "and wish him every success in his future endeavors.",
-        size=12
-    )
-
-    # ===============================
-    # SAVE DOCX
+    # OUTPUT PATH
     # ===============================
     output_dir = os.path.join(settings.MEDIA_ROOT, "certificates")
     os.makedirs(output_dir, exist_ok=True)
 
-    docx_filename = f"certificate_{user.id}_{course.id}.docx"
     pdf_filename = f"certificate_{user.id}_{course.id}.pdf"
-
-    docx_path = os.path.join(output_dir, docx_filename)
     pdf_path = os.path.join(output_dir, pdf_filename)
 
-    doc.save(docx_path)
+    # ===============================
+    # CREATE PDF
+    # ===============================
+    c = canvas.Canvas(pdf_path, pagesize=A4)
+    width, height = A4
+
+    # OPTIONAL: background image
+    bg_path = os.path.join(
+        settings.BASE_DIR,
+        "api",
+        "static",
+        "certificates",
+        "background.png"
+    )
+    if os.path.exists(bg_path):
+        c.drawImage(bg_path, 0, 0, width=width, height=height)
 
     # ===============================
-    # CONVERT → PDF (SAFE)
+    # HEADER
     # ===============================
-    convert_docx_to_pdf(docx_path, pdf_path)
+    c.setFont("Helvetica", 11)
+    c.drawString(50, height - 50, f"Date: {today}")
+    c.drawRightString(width - 50, height - 50, f"Ref: {ref_no}")
 
-    # OPTIONAL: remove DOCX
-    os.remove(docx_path)
+    # ===============================
+    # TITLE
+    # ===============================
+    c.setFont("Helvetica-Bold", 20)
+    c.drawCentredString(
+        width / 2,
+        height - 120,
+        "TO WHOMSOEVER IT MAY CONCERN"
+    )
+
+    # ===============================
+    # BODY TEXT (PROPERLY ALIGNED)
+    # ===============================
+    left_margin = 80
+    right_margin = 80
+    content_width = width - left_margin - right_margin
+    cursor_y = height - 180
+
+    para1 = (
+        f"This is to certify that {title}{name} has successfully completed "
+        f"his internship program in {course.title} from "
+        f"{start_date.strftime('%d %B %Y')} to "
+        f"{end_date.strftime('%d %B %Y')} at Walnex."
+    )
+
+    cursor_y = draw_paragraph(
+        c, para1, left_margin, cursor_y, content_width
+    )
+
+    para2 = (
+        "During the internship period, we found him to be extremely inquisitive, "
+        "hardworking, and disciplined. He demonstrated strong interest and curiosity "
+        "in understanding the functions of our core development process and consistently "
+        "put in dedicated effort. He showed willingness to dive deep into both backend "
+        "and frontend concepts to strengthen his practical understanding."
+    )
+
+    cursor_y = draw_paragraph(
+        c, para2, left_margin, cursor_y - 10, content_width
+    )
+
+    para3 = (
+        "We appreciate his enthusiasm and commitment throughout the internship "
+        "and wish him every success in his future endeavors."
+    )
+
+    cursor_y = draw_paragraph(
+        c, para3, left_margin, cursor_y - 10, content_width
+    )
+
+    # ===============================
+    # SIGNATURE AREA
+    # ===============================
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(left_margin, 120, "Authorized Signatory")
+    c.setFont("Helvetica", 11)
+    c.drawString(left_margin, 100, "Walnex / Nexston")
+
+    # ===============================
+    # FINALIZE
+    # ===============================
+    c.showPage()
+    c.save()
 
     return pdf_path, ref_no
 
