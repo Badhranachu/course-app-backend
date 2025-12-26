@@ -1,13 +1,11 @@
 # api/utils.py
 
-from docx import Document
-from docx.shared import Pt
+
 import os
 from django.conf import settings
 from django.utils import timezone
 from datetime import timedelta
 
-import pythoncom
 import reportlab
 from api.models import CertificateSequence
 from reportlab.pdfgen import canvas
