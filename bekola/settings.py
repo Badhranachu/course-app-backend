@@ -161,6 +161,7 @@ CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOWED_ORIGINS = [
     "https://nexston.in",
     "https://www.nexston.in",
+    "http://localhost:5173"
 ]
 
 CSRF_TRUSTED_ORIGINS = [

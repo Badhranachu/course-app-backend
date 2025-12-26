@@ -279,7 +279,7 @@ def delayed_transfer_and_email(precert_id):
         return
 
     # 🔁 CHANGE TO days=30 IN PRODUCTION
-    eligible_at = enrollment.payment_date + timedelta(minutes=2)
+    eligible_at = enrollment.payment_date + timedelta(minutes=0)
 
     if timezone.now() < eligible_at:
         logger.info(f"Not eligible yet: {user.email}")

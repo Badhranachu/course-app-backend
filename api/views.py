@@ -1305,3 +1305,74 @@ class CourseModuleProgressAPIView(APIView):
             "course_title": course.title,
             "modules": response
         })
+    
+
+from rest_framework.permissions import AllowAny
+class CertificateCheckAPIView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        reference_number = request.data.get("reference_number")
+
+        if not reference_number:
+            return Response(
+                {"error": "Reference number is required"},
+                status=400
+            )
+
+        try:
+            cert = Certificate.objects.select_related(
+                "user", "course"
+            ).get(reference_number=reference_number)
+        except Certificate.DoesNotExist:
+            return Response(
+                {"error": "Certificate not found"},
+                status=404
+            )
+
+        # Safe student name
+        try:
+            name = cert.user.student_profile.full_name
+        except Exception:
+            name = cert.user.email
+
+        # 🔥 Dynamic base URL (local + production safe)
+        base_url = request.build_absolute_uri("/").rstrip("/")
+
+        return Response(
+            {
+                "status": "valid",
+                "reference_number": cert.reference_number,
+                "student_name": name,
+                "course": cert.course.title,
+                "issued_on": cert.created_at.strftime("%d %B %Y"),
+                "certificate_url": (
+                    f"{base_url}/api/certificate/download/"
+                    f"{cert.reference_number}/"
+                ),
+            },
+            status=200
+        )
+    
+
+
+class CertificateDownloadAPIView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request, reference_number):
+        try:
+            cert = Certificate.objects.get(
+                reference_number=reference_number
+            )
+        except Certificate.DoesNotExist:
+            raise Http404("Certificate not found")
+
+        if not cert.certificate_file:
+            raise Http404("File missing")
+
+        # ✅ Backend streams file (Cloudflare R2 stays private)
+        return FileResponse(
+            cert.certificate_file.open("rb"),
+            as_attachment=True,
+            filename=f"{reference_number}.pdf",  # ✅ saved using reference number
+        )

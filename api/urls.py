@@ -133,4 +133,19 @@ path(
     # MODULE / PROGRESS
     # =========================
     path("modules/<int:module_id>/complete-video/", views.CompleteVideoAPIView.as_view()),
+
+
+    path(
+        "certificate/check/",
+        views.CertificateCheckAPIView.as_view(),
+        name="certificate-check",
+    ),
+    path(
+        "certificate/download/<path:reference_number>/",
+        views.CertificateDownloadAPIView.as_view(),
+        name="certificate-download",
+    ),
+
+
+
 ]
