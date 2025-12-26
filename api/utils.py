@@ -12,25 +12,37 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import inch
 from textwrap import wrap
+from reportlab.platypus import Paragraph
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.enums import TA_JUSTIFY\
 
-def draw_paragraph(c, text, x, y, max_width, font="Helvetica", size=12, leading=18):
-    """
-    Draw a wrapped paragraph within given width.
-    Returns new Y position after drawing.
-    """
-    c.setFont(font, size)
-    text_obj = c.beginText(x, y)
-    text_obj.setLeading(leading)
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+FONT_DIR = os.path.join(settings.BASE_DIR, "api", "static", "fonts")
 
-    # Approx chars per line (stable for certificates)
-    max_chars = int(max_width / (size * 0.55))
-    lines = wrap(text, max_chars)
+pdfmetrics.registerFont(
+    TTFont("TimesNewRoman", os.path.join(FONT_DIR, "times.ttf"))
+)
 
-    for line in lines:
-        text_obj.textLine(line)
+pdfmetrics.registerFont(
+    TTFont("TimesNewRoman-Bold", os.path.join(FONT_DIR, "timesbd.ttf"))
+)
 
-    c.drawText(text_obj)
-    return y - leading * (len(lines) + 1)
+
+def draw_justified_paragraph(canvas, text, x, y, width, leading=18):
+    style = ParagraphStyle(
+        name="Justified",
+        fontName="Times-Roman",
+        fontSize=13,
+        leading=leading,
+        alignment=TA_JUSTIFY
+    )
+
+    para = Paragraph(text, style)
+    w, h = para.wrap(width, 1000)
+    para.drawOn(canvas, x, y - h)
+    return y - h
+
 
 
 # =====================================================
@@ -39,14 +51,14 @@ def draw_paragraph(c, text, x, y, max_width, font="Helvetica", size=12, leading=
 def generate_certificate(*, user, course):
 
     # ===============================
-    # STUDENT DETAILS (SAFE)
+    # STUDENT DETAILS
     # ===============================
     try:
         profile = user.student_profile
-        name = profile.full_name.strip()
+        name = profile.full_name.strip().title()   # ✅ Capitalize each word
         title = "Mr. " if profile.gender == "male" else "Ms. "
-    except StudentProfile.DoesNotExist:
-        name = user.email.split("@")[0]
+    except:
+        name = user.email.split("@")[0].title()
         title = "Mr. "
 
     # ===============================
@@ -59,7 +71,7 @@ def generate_certificate(*, user, course):
     # ===============================
     # DATE + REF NUMBER
     # ===============================
-    today = timezone.now().strftime("%d/%m/%Y")
+    today = timezone.now().strftime("%d %B %Y")
 
     seq, _ = CertificateSequence.objects.get_or_create(id=1)
     seq.last_number += 1
@@ -73,8 +85,13 @@ def generate_certificate(*, user, course):
     output_dir = os.path.join(settings.MEDIA_ROOT, "certificates")
     os.makedirs(output_dir, exist_ok=True)
 
-    pdf_filename = f"certificate_{user.id}_{course.id}.pdf"
-    pdf_path = os.path.join(output_dir, pdf_filename)
+    safe_ref = ref_no.replace("/", "-")
+
+    pdf_path = os.path.join(
+        output_dir,
+        f"{safe_ref}.pdf"
+    )
+
 
     # ===============================
     # CREATE PDF
@@ -82,50 +99,70 @@ def generate_certificate(*, user, course):
     c = canvas.Canvas(pdf_path, pagesize=A4)
     width, height = A4
 
-    # OPTIONAL: background image
+    # ===============================
+    # BACKGROUND TEMPLATE
+    # ===============================
     bg_path = os.path.join(
         settings.BASE_DIR,
         "api",
         "static",
         "certificates",
-        "background.png"
+        "template.jpg"
     )
     if os.path.exists(bg_path):
         c.drawImage(bg_path, 0, 0, width=width, height=height)
 
     # ===============================
-    # HEADER
+    # MARGINS (NARROWER PARAGRAPH)
     # ===============================
-    c.setFont("Helvetica", 11)
-    c.drawString(50, height - 50, f"Date: {today}")
-    c.drawRightString(width - 50, height - 50, f"Ref: {ref_no}")
+    left_margin = 90
+    right_margin = 90
+    content_width = width - left_margin - right_margin
 
     # ===============================
-    # TITLE
+    # HEADER (MOVED DOWN ~10%)
     # ===============================
-    c.setFont("Helvetica-Bold", 20)
+    header_y = height - 210
+    c.setFont("TimesNewRoman", 13)
+
+    # Date (left aligned with paragraph)
+    c.drawString(
+        left_margin,
+        header_y,
+        f"Date: {today}"
+    )
+
+    # Ref (right aligned with paragraph)
+    c.drawRightString(
+        left_margin + content_width,
+        header_y,
+        f"Ref: {ref_no}"
+    )
+
+    # ===============================
+    # TITLE (SIZE 14)
+    # ===============================
+    c.setFont("TimesNewRoman-Bold", 14)
     c.drawCentredString(
         width / 2,
-        height - 120,
+        height - 280,
         "TO WHOMSOEVER IT MAY CONCERN"
     )
 
     # ===============================
-    # BODY TEXT (PROPERLY ALIGNED)
+    # BODY TEXT (MOVED DOWN ~10%)
     # ===============================
-    left_margin = 80
-    right_margin = 80
-    content_width = width - left_margin - right_margin
-    cursor_y = height - 180
+    cursor_y = height - 320
 
     para1 = (
-        f"This is to certify that {title}{name} has successfully completed "
-        f"his internship program in {course.title} from "
-        f"{start_date.strftime('%d %B %Y')} to "
-        f"{end_date.strftime('%d %B %Y')} at Walnex."
+        f"This is to certify that "
+        f"<b>{title}{name}</b> has successfully completed "
+        f"his internship program in <b>{course.title}</b> from "
+        f"<b>{start_date.strftime('%d %B %Y')}</b> to "
+        f"<b>{end_date.strftime('%d %B %Y')}</b> at Nexston."
     )
 
-    cursor_y = draw_paragraph(
+    cursor_y = draw_justified_paragraph(
         c, para1, left_margin, cursor_y, content_width
     )
 
@@ -137,8 +174,8 @@ def generate_certificate(*, user, course):
         "and frontend concepts to strengthen his practical understanding."
     )
 
-    cursor_y = draw_paragraph(
-        c, para2, left_margin, cursor_y - 10, content_width
+    cursor_y = draw_justified_paragraph(
+        c, para2, left_margin, cursor_y - 24, content_width
     )
 
     para3 = (
@@ -146,17 +183,9 @@ def generate_certificate(*, user, course):
         "and wish him every success in his future endeavors."
     )
 
-    cursor_y = draw_paragraph(
-        c, para3, left_margin, cursor_y - 10, content_width
+    cursor_y = draw_justified_paragraph(
+        c, para3, left_margin, cursor_y - 24, content_width
     )
-
-    # ===============================
-    # SIGNATURE AREA
-    # ===============================
-    c.setFont("Helvetica-Bold", 12)
-    c.drawString(left_margin, 120, "Authorized Signatory")
-    c.setFont("Helvetica", 11)
-    c.drawString(left_margin, 100, "Walnex / Nexston")
 
     # ===============================
     # FINALIZE
@@ -165,7 +194,6 @@ def generate_certificate(*, user, course):
     c.save()
 
     return pdf_path, ref_no
-
 
 from django.core.mail import send_mail
 
