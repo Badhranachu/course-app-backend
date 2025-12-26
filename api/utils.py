@@ -209,7 +209,7 @@ def send_otp_email(email: str, otp: str):
         f"This OTP is valid for 5 minutes.\n"
         f"Please do not share this OTP with anyone.\n\n"
         f"Regards,\n"
-        f"Nexston / Walnex Team"
+        f"Nexston Team"
     )
 
     send_mail(
@@ -245,7 +245,7 @@ logger = logging.getLogger(__name__)
 
 logger = logging.getLogger(__name__)
 
-
+from api.models import PreCertificate
 def delayed_transfer_and_email(precert_id):
     """
     Safe to retry multiple times.
@@ -295,14 +295,17 @@ def delayed_transfer_and_email(precert_id):
             if hasattr(user, "student_profile")
             else user.email.split("@")[0]
         )
-
+        ref_no = precert.reference_number
         email = EmailMessage(
             subject=f"Certificate for {course.title}",
             body=(
-                f"Hi {name},\n\n"
-                f"Your internship certificate is attached.\n\n"
-                f"Regards,\nWalnex / Nexston"
-            ),
+            f"Hi {name},\n\n"
+            f"Your internship certificate is attached.\n\n"
+            f"Reference Number: {ref_no}\n\n"   # ✅ INCLUDED
+            f"Regards,\n"
+            f"Walnex / Nexston"
+        ),
+
             to=[user.email],
         )
 
