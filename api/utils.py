@@ -303,7 +303,7 @@ def delayed_transfer_and_email(precert_id):
             f"Your internship certificate is attached.\n\n"
             f"Reference Number: {ref_no}\n\n"   # ✅ INCLUDED
             f"Regards,\n"
-            f"Walnex / Nexston"
+            f"Team Nexston"
         ),
 
             to=[user.email],
