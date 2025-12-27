@@ -354,3 +354,20 @@ def delayed_transfer_and_email(precert_id):
 
     except Exception:
         logger.exception("Cloudflare upload failed AFTER email")
+
+
+
+    
+
+
+
+from pymongo import MongoClient
+import os
+
+client = MongoClient(os.getenv("MONGO_URI"))
+db = client["groq_chatbot"]
+collection = db["documents"]
+
+def get_context_from_db(query: str) -> str:
+    docs = collection.find().limit(5)
+    return "\n".join(doc["content"] for doc in docs)

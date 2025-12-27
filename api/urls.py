@@ -161,6 +161,11 @@ path(
     path("support/create/", views.CreateSupportTicketAPIView.as_view()),
     path("support/my-tickets/", views.MySupportTicketsAPIView.as_view()),
 
+
+
+    path("chat/", views.ChatWithAIView.as_view(), name="chat-with-ai"),
+
+
 #
 
 

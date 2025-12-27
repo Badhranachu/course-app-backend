@@ -1754,3 +1754,37 @@ class MyCertificateDownloadAPIView(APIView):
             as_attachment=True,
             filename=f"{reference_number}.pdf",
         )
+    
+
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+
+from api.utils import get_context_from_db
+from api.groq_client import ask_groq
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+
+from api.mongo_utils import get_prompt_context, save_user_chat
+from api.groq_client import ask_groq
+class ChatWithAIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        question = request.data.get("question")
+
+        if not question:
+            return Response({"error": "Question is required"}, status=400)
+
+        context = get_prompt_context()
+        answer = ask_groq(context, question)
+
+        save_user_chat(request.user.email, question, answer)
+
+        return Response({
+            "question": question,
+            "answer": answer
+        })
