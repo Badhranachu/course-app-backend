@@ -7,6 +7,8 @@ from dotenv import load_dotenv
 # -------------------------------------------------
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
+R2_PUBLIC_URL = os.getenv("R2_PUBLIC_URL")
+
 
 import pymysql
 pymysql.install_as_MySQLdb()
@@ -100,6 +102,8 @@ DATABASES = {
 # -------------------------------------------------
 # STATIC & MEDIA
 # -------------------------------------------------
+MEDIA_ROOT = BASE_DIR / "media"
+
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [BASE_DIR / "static"]

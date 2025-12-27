@@ -1113,6 +1113,56 @@ from api.models import (
 )
 from django.conf import settings
 
+from moviepy.editor import VideoFileClip
+import tempfile
+import shutil
+from moviepy.editor import VideoFileClip
+
+
+def ensure_video_duration(video):
+    """
+    Calculate and save video duration ONLY if missing.
+    Windows-safe (no file lock issue).
+    """
+    if video.duration:
+        return video.duration
+
+    if not video.video_file:
+        return 0
+
+    tmp_path = None
+
+    try:
+        # 1️⃣ Create temp file path (not locked)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
+            tmp_path = tmp.name
+            with video.video_file.open("rb") as src:
+                shutil.copyfileobj(src, tmp)
+
+        # 2️⃣ Now ffmpeg/moviepy can read it
+        clip = VideoFileClip(tmp_path)
+        duration = int(clip.duration)
+        clip.close()
+
+        # 3️⃣ Save duration
+        video.duration = duration
+        video.save(update_fields=["duration"])
+
+        return duration
+
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        return 0
+
+    finally:
+        # 4️⃣ Cleanup temp file
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+    
 MAX_FORWARD_SKIP = 1800  # ✅ 30 minutes (in seconds)
 
 class UpdateVideoProgressAPIView(APIView):
@@ -1134,6 +1184,9 @@ class UpdateVideoProgressAPIView(APIView):
         response = []
 
         for video in videos:
+            # ✅ ENSURE DURATION EVEN IN GET
+            duration = ensure_video_duration(video)
+
             progress = StudentVideoProgress.objects.filter(
                 user=user, video=video
             ).first()
@@ -1142,15 +1195,15 @@ class UpdateVideoProgressAPIView(APIView):
             completed = progress.is_completed if progress else False
 
             percentage = (
-                int((watched / video.duration) * 100)
-                if video.duration > 0
+                int((watched / duration) * 100)
+                if duration > 0
                 else 0
             )
 
             response.append({
                 "video_id": video.id,
                 "title": video.title,
-                "duration": video.duration,
+                "duration": duration,
                 "watched_seconds": watched,
                 "progress_percent": percentage,
                 "last_position": progress.last_position if progress else 0,
@@ -1209,22 +1262,34 @@ class UpdateVideoProgressAPIView(APIView):
         # ==============================
         # 🔒 SAFE SYNC (NO NULLS)
         # ==============================
-        if video.duration:
-            capped_time = min(current_time, video.duration)
+        duration = ensure_video_duration(video)
 
+        if duration and current_time >= int(duration * 0.9):
+            progress.watched_seconds = duration
+            progress.last_position = duration
+        else:
+            capped_time = min(current_time, duration)
             progress.last_position = max(progress.last_position or 0, capped_time)
             progress.watched_seconds = max(progress.watched_seconds or 0, capped_time)
 
         # ==============================
         # ✅ COMPLETION CHECK (90%)
         # ==============================
-        completion_threshold = int(video.duration * 0.9) if video.duration else 0
+        # ==============================
+        # ✅ COMPLETION CHECK (>= 90%)
+        # ==============================
+        if duration:
+            watched_percent = (progress.watched_seconds / duration) * 100
+        else:
+            watched_percent = 0
 
-        if not progress.is_completed and progress.watched_seconds >= completion_threshold:
+        if not progress.is_completed and watched_percent >= 90:
             progress.is_completed = True
             progress.completed_at = timezone.now()
-            progress.last_position = video.duration
-            progress.watched_seconds = video.duration
+
+            # 🔒 force to full duration
+            progress.last_position = duration
+            progress.watched_seconds = duration
 
             StudentContentProgress.objects.update_or_create(
                 user=user,
@@ -1288,19 +1353,31 @@ class CourseModuleProgressAPIView(APIView):
         ).order_by("order")
 
         response = []
+        previous_completed = False
 
-        for module in modules:
-            unlocked = StudentModuleUnlock.objects.filter(
-                user=user,
-                module=module,
-                is_unlocked=True
-            ).exists()
+        for index, module in enumerate(modules):
+            # 🔓 FIRST MODULE ALWAYS UNLOCKED
+            if index == 0:
+                unlocked = True
+            else:
+                unlocked = previous_completed
 
-            completed = StudentContentProgress.objects.filter(
-                user=user,
-                module=module,
-                is_completed=True
-            ).exists()
+            # ✅ CHECK COMPLETION
+            if module.item_type == "video" and module.video:
+                completed = StudentVideoProgress.objects.filter(
+                    user=user,
+                    video=module.video,
+                    is_completed=True
+                ).exists()
+            else:
+                completed = StudentContentProgress.objects.filter(
+                    user=user,
+                    module=module,
+                    is_completed=True
+                ).exists()
+
+            # 🔥 UPDATE previous_completed for next iteration
+            previous_completed = completed
 
             item_data = {
                 "module_id": module.id,
@@ -1324,6 +1401,7 @@ class CourseModuleProgressAPIView(APIView):
                 })
 
             response.append(item_data)
+
 
         return Response({
             "course_id": course.id,

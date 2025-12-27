@@ -159,7 +159,10 @@ class Course(models.Model):
 # =====================================================
 # VIDEO
 # =====================================================
-
+from moviepy.editor import VideoFileClip
+import tempfile
+import shutil
+import os
 class Video(models.Model):
     course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name="videos")
     title = models.CharField(max_length=200)
@@ -174,17 +177,33 @@ class Video(models.Model):
 
     def save(self, *args, **kwargs):
         super().save(*args, **kwargs)
+
         if self.video_file and not self.duration:
+            tmp_path = None
             try:
-                clip = VideoFileClip(self.video_file.path)
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
+                    tmp_path = tmp.name
+                    with self.video_file.open("rb") as src:
+                        shutil.copyfileobj(src, tmp)
+
+                clip = VideoFileClip(tmp_path)
                 self.duration = int(clip.duration)
                 clip.close()
-                super().save(update_fields=["duration"])
-            except Exception:
-                pass
 
+                super().save(update_fields=["duration"])
+
+            except Exception:
+                import traceback
+                traceback.print_exc()
+
+            finally:
+                if tmp_path and os.path.exists(tmp_path):
+                    try:
+                        os.remove(tmp_path)
+                    except Exception:
+                        pass
     def __str__(self):
-        return f"Video → {self.title} ({self.course.title})"
+        return f"{self.course.title} → {self.title}"
 
 
 # =====================================================
@@ -264,17 +283,35 @@ class Test(models.Model):
 
 
 class Question(models.Model):
-    test = models.ForeignKey(Test, on_delete=models.CASCADE, related_name="questions")
+    ANSWER_CHOICES = [
+        ("A", "Option A"),
+        ("B", "Option B"),
+        ("C", "Option C"),
+        ("D", "Option D"),
+    ]
+
+    test = models.ForeignKey(
+        Test,
+        on_delete=models.CASCADE,
+        related_name="questions"
+    )
     text = models.CharField(max_length=500)
+
     option_a = models.CharField(max_length=200)
     option_b = models.CharField(max_length=200)
     option_c = models.CharField(max_length=200)
     option_d = models.CharField(max_length=200)
-    correct_answer = models.CharField(max_length=1)
+
+    correct_answer = models.CharField(
+        max_length=1,
+        choices=ANSWER_CHOICES,   # ✅ DROPDOWN
+    )
+
     marks = models.PositiveIntegerField(default=1)
 
     def __str__(self):
         return f"Question → {self.text[:40]}..."
+
 
 
 # =====================================================
@@ -283,14 +320,20 @@ class Question(models.Model):
 
 class CourseModuleItem(models.Model):
     ITEM_TYPES = [("video", "Video"), ("test", "Test")]
-    course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name="modules")
+
+    course = models.ForeignKey(
+        Course,
+        on_delete=models.CASCADE,
+        related_name="modules"
+    )
     item_type = models.CharField(max_length=10, choices=ITEM_TYPES)
     video = models.ForeignKey(Video, null=True, blank=True, on_delete=models.CASCADE)
     test = models.ForeignKey(Test, null=True, blank=True, on_delete=models.CASCADE)
-    order = models.PositiveIntegerField(default=0)
+    order = models.PositiveIntegerField()
 
     class Meta:
         ordering = ["order"]
+        unique_together = ("course", "order")  # ✅ IMPORTANT
 
     def clean(self):
         if self.item_type == "video" and not self.video:
@@ -300,7 +343,6 @@ class CourseModuleItem(models.Model):
 
     def __str__(self):
         return f"{self.course.title} → {self.item_type} #{self.order}"
-
 
 # =====================================================
 # STUDENT TEST + ANSWERS

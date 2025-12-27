@@ -55,7 +55,7 @@ def generate_certificate(*, user, course):
     # ===============================
     try:
         profile = user.student_profile
-        name = profile.full_name.strip().title()   # ✅ Capitalize each word
+        name = profile.full_name.strip().title()
         title = "Mr. " if profile.gender == "male" else "Ms. "
     except:
         name = user.email.split("@")[0].title()
@@ -80,18 +80,17 @@ def generate_certificate(*, user, course):
     ref_no = f"NEX/INT/2025/{str(seq.last_number).zfill(2)}"
 
     # ===============================
-    # OUTPUT PATH
+    # SAFE FILE NAME  ✅ FIX
+    # ===============================
+    safe_ref = ref_no.replace("/", "-")
+
+    # ===============================
+    # OUTPUT PATH  ✅ FIX
     # ===============================
     output_dir = os.path.join(settings.MEDIA_ROOT, "certificates")
     os.makedirs(output_dir, exist_ok=True)
 
-    safe_ref = ref_no.replace("/", "-")
-
-    pdf_path = os.path.join(
-        output_dir,
-        f"{safe_ref}.pdf"
-    )
-
+    pdf_path = os.path.join(output_dir, f"{safe_ref}.pdf")
 
     # ===============================
     # CREATE PDF
@@ -113,26 +112,19 @@ def generate_certificate(*, user, course):
         c.drawImage(bg_path, 0, 0, width=width, height=height)
 
     # ===============================
-    # MARGINS (NARROWER PARAGRAPH)
+    # MARGINS
     # ===============================
     left_margin = 90
     right_margin = 90
     content_width = width - left_margin - right_margin
 
     # ===============================
-    # HEADER (MOVED DOWN ~10%)
+    # HEADER
     # ===============================
     header_y = height - 210
     c.setFont("TimesNewRoman", 13)
 
-    # Date (left aligned with paragraph)
-    c.drawString(
-        left_margin,
-        header_y,
-        f"Date: {today}"
-    )
-
-    # Ref (right aligned with paragraph)
+    c.drawString(left_margin, header_y, f"Date: {today}")
     c.drawRightString(
         left_margin + content_width,
         header_y,
@@ -140,7 +132,7 @@ def generate_certificate(*, user, course):
     )
 
     # ===============================
-    # TITLE (SIZE 14)
+    # TITLE
     # ===============================
     c.setFont("TimesNewRoman-Bold", 14)
     c.drawCentredString(
@@ -150,7 +142,7 @@ def generate_certificate(*, user, course):
     )
 
     # ===============================
-    # BODY TEXT (MOVED DOWN ~10%)
+    # BODY
     # ===============================
     cursor_y = height - 320
 
@@ -194,6 +186,7 @@ def generate_certificate(*, user, course):
     c.save()
 
     return pdf_path, ref_no
+
 
 from django.core.mail import send_mail
 
@@ -244,12 +237,14 @@ import logging
 logger = logging.getLogger(__name__)
 
 logger = logging.getLogger(__name__)
+from api.r2 import upload_pdf_to_r2
+
 
 from api.models import PreCertificate
 def delayed_transfer_and_email(precert_id):
     """
     Safe to retry multiple times.
-    Sends mail ONLY after 30 days from PAYMENT DATE.
+    Sends mail ONLY after eligibility time.
     """
 
     try:
@@ -267,26 +262,22 @@ def delayed_transfer_and_email(precert_id):
         enrollment = Enrollment.objects.get(
             user=user,
             course=course,
-            status="completed"  # ✅ IMPORTANT
+            status="completed"
         )
     except Enrollment.DoesNotExist:
-        logger.info(f"No completed enrollment: {user.email}")
         return
 
-    # ---------- PAYMENT DATE CHECK ----------
     if not enrollment.payment_date:
-        logger.warning(f"Payment date missing: {user.email}")
         return
 
-    # 🔁 CHANGE TO days=30 IN PRODUCTION
     eligible_at = enrollment.payment_date + timedelta(minutes=0)
-
     if timezone.now() < eligible_at:
-        logger.info(f"Not eligible yet: {user.email}")
         return
 
-    old_path = precert.certificate_file.name
-    filename = os.path.basename(old_path)
+    file_field = precert.certificate_file
+    filename = os.path.basename(file_field.name)
+
+    ref_no = precert.reference_number
 
     # ---------- SEND EMAIL ----------
     try:
@@ -295,51 +286,71 @@ def delayed_transfer_and_email(precert_id):
             if hasattr(user, "student_profile")
             else user.email.split("@")[0]
         )
-        ref_no = precert.reference_number
+
         email = EmailMessage(
             subject=f"Certificate for {course.title}",
             body=(
-            f"Hi {name},\n\n"
-            f"Your internship certificate is attached.\n\n"
-            f"Reference Number: {ref_no}\n\n"   # ✅ INCLUDED
-            f"Regards,\n"
-            f"Team Nexston"
-        ),
-
+                f"Hi {name},\n\n"
+                f"Your internship certificate is attached.\n\n"
+                f"Reference Number: {ref_no}\n\n"
+                f"Regards,\nTeam Nexston"
+            ),
             to=[user.email],
         )
 
-        with default_storage.open(old_path, "rb") as f:
+        with file_field.open("rb") as f:
             email.attach(filename, f.read(), "application/pdf")
 
         email.send(fail_silently=False)
-        logger.info(f"Email sent: {user.email}")
 
     except Exception:
         logger.exception("Email failed. Will retry.")
-        return  # ❌ DO NOT MOVE FILE
+        return  # ❌ do nothing if email fails
 
-    # ---------- MOVE FILE ----------
+    # ---------- FINALIZE (CLOUDFLARE) ----------
     try:
-        new_path = f"certificates/{filename}"
+        # Reference to stored file (PreCertificate FileField)
+        file_field = precert.certificate_file
+        filename = os.path.basename(file_field.name)
+        ref_no = precert.reference_number
 
-        with default_storage.open(old_path, "rb") as f:
-            default_storage.save(new_path, ContentFile(f.read()))
+        # ---------- Upload to Cloudflare ----------
+        with file_field.open("rb") as f:
+            cloud_url = upload_pdf_to_r2(
+                f.read(),
+                f"certificates/{filename}"
+            )
 
-        default_storage.delete(old_path)
-
+        # ---------- Save final certificate ----------
         Certificate.objects.update_or_create(
             user=user,
             course=course,
             defaults={
                 "github_link": precert.github_link,
-                "certificate_file": new_path,
-                "reference_number": precert.reference_number,  # ✅ FINAL SAVE
+                "certificate_file": cloud_url,   # ✅ Cloudflare URL
+                "reference_number": ref_no,
             },
         )
 
+        # ---------- CLEANUP (IMPORTANT) ----------
+
+        # 1️⃣ Delete Django FileField copy
+        file_field.delete(save=False)
+
+        # 2️⃣ Delete originally generated PDF (ReportLab file)
+        original_path = os.path.join(
+            settings.MEDIA_ROOT,
+            "certificates",
+            filename
+        )
+
+        if os.path.exists(original_path):
+            os.remove(original_path)
+
+        # 3️⃣ Delete PreCertificate row
         precert.delete()
-        logger.info(f"Certificate finalized: {user.email}")
+
+        logger.info(f"Certificate finalized in Cloudflare: {user.email}")
 
     except Exception:
-        logger.exception("File move failed AFTER email")
+        logger.exception("Cloudflare upload failed AFTER email")
