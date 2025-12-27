@@ -827,15 +827,38 @@ class CourseVideosAPIView(APIView):
 
 
 from api.utils import generate_certificate
-class GenerateUserCertificateAPIView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+# class GenerateUserCertificateAPIView(APIView):
+#     permission_classes = [IsAuthenticated]
 
-    def get(self, request):
-        profile = request.user.student_profile
-        name = profile.full_name.upper()
+#     def get(self, request):
+#         profile = request.user.student_profile
+#         name = profile.full_name.upper()
 
-        file_path = generate_certificate(name)
-        return FileResponse(open(file_path, "rb"), as_attachment=True)
+#         # 1️⃣ Generate certificate PDF (returns local path + reference)
+#         file_path, reference_number = generate_certificate(name, request.user)
+
+#         # 2️⃣ Create DB record
+#         cert = Certificate.objects.create(
+#             user=request.user,
+#             course=profile.course,  # adjust if needed
+#             reference_number=reference_number,
+#         )
+
+#         # 3️⃣ Save file to FileField (VERY IMPORTANT)
+#         with open(file_path, "rb") as f:
+#             cert.certificate_file.save(
+#                 os.path.basename(file_path),
+#                 f,
+#                 save=True
+#             )
+
+#         # 4️⃣ Stream file securely from R2
+#         return FileResponse(
+#             cert.certificate_file.open("rb"),
+#             as_attachment=True,
+#             filename=f"{reference_number}.pdf",
+#         )
+
 
 
 
@@ -1458,28 +1481,19 @@ class CertificateCheckAPIView(APIView):
         )
     
 
+from django.shortcuts import redirect
 
 class CertificateDownloadAPIView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request, reference_number):
-        try:
-            cert = Certificate.objects.get(
-                reference_number=reference_number
-            )
-        except Certificate.DoesNotExist:
-            raise Http404("Certificate not found")
+        cert = Certificate.objects.get(reference_number=reference_number)
 
-        if not cert.certificate_file:
-            raise Http404("File missing")
-
-        # ✅ Backend streams file (Cloudflare R2 stays private)
         return FileResponse(
             cert.certificate_file.open("rb"),
             as_attachment=True,
-            filename=f"{reference_number}.pdf",  # ✅ saved using reference number
+            filename=f"{reference_number}.pdf",
         )
-
 
     
 from django.conf import settings
@@ -1632,3 +1646,60 @@ class StudentEnrollmentListAPIView(APIView):
 
         serializer = StudentEnrollmentSerializer(enrollments, many=True)
         return Response(serializer.data)
+    
+
+
+
+from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from .models import SupportTicket
+
+class CreateSupportTicketAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        subject = request.data.get("subject")
+        message = request.data.get("message")
+
+        if not subject or not message:
+            return Response(
+                {"error": "Subject and message are required"},
+                status=400
+            )
+
+        SupportTicket.objects.create(
+            user=request.user,
+            subject=subject,
+            message=message
+        )
+
+        return Response(
+            {"message": "Support ticket created successfully"},
+            status=201
+        )
+    
+
+
+
+class MySupportTicketsAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        tickets = SupportTicket.objects.filter(
+            user=request.user
+        ).order_by("-created_at")
+
+        data = [
+            {
+                "id": t.id,
+                "subject": t.subject,
+                "message": t.message,
+                "status": t.status,
+                "admin_note": t.admin_note,
+                "created_at": t.created_at,
+            }
+            for t in tickets
+        ]
+
+        return Response(data)

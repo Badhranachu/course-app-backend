@@ -1,13 +1,22 @@
 from django.contrib import admin
 from django.apps import apps
 from django import forms
-from .models import CourseModuleItem, Course
 
+from .models import (
+    Course,
+    CourseModuleItem,
+    SupportTicket,
+)
+
+# =====================================================
+# AUTO-REGISTER ALL MODELS EXCEPT THOSE WITH CUSTOM ADMIN
+# =====================================================
 
 app = apps.get_app_config("api")
 
 EXCLUDE_MODELS = {
-    CourseModuleItem,   # 👈 exclude models with custom admin
+    CourseModuleItem,   # custom admin below
+    SupportTicket,      # custom admin below
 }
 
 for model in app.get_models():
@@ -18,6 +27,10 @@ for model in app.get_models():
     except admin.sites.AlreadyRegistered:
         pass
 
+
+# =====================================================
+# COURSE MODULE ITEM ADMIN (CUSTOM)
+# =====================================================
 
 class CourseModuleItemAdminForm(forms.ModelForm):
     class Meta:
@@ -44,7 +57,9 @@ class CourseModuleItemAdminForm(forms.ModelForm):
         if course:
             used_orders = CourseModuleItem.objects.filter(
                 course=course
-            ).exclude(pk=self.instance.pk).values_list("order", flat=True)
+            ).exclude(pk=self.instance.pk).values_list(
+                "order", flat=True
+            )
 
             max_order = max(used_orders, default=0) + 5
 
@@ -63,3 +78,24 @@ class CourseModuleItemAdmin(admin.ModelAdmin):
     list_display = ("course", "item_type", "order")
     list_filter = ("course", "item_type")
     ordering = ("course", "order")
+
+
+# =====================================================
+# SUPPORT TICKET ADMIN (CUSTOM)
+# =====================================================
+
+@admin.register(SupportTicket)
+class SupportTicketAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "subject",
+        "user",
+        "status",
+        "created_at",
+    )
+
+    list_filter = ("status", "created_at")
+    search_fields = ("subject", "message", "user__email")
+    ordering = ("-created_at",)
+
+    readonly_fields = ("user", "created_at", "updated_at")

@@ -316,7 +316,7 @@ class StudentProfileSerializer(serializers.ModelSerializer):
             "github_url",
             "created_at",
         )
-        read_only_fields = ("created_at","email")
+        read_only_fields = ("created_at","email","course_name",)
 
 
 

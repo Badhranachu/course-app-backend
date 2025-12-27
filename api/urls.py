@@ -124,7 +124,7 @@ path(
     views.SaveGithubLinkAPIView.as_view(),
     name="certificate-github-link"
 ),
-    path("certificate/generate/", views.GenerateUserCertificateAPIView.as_view()),
+    # path("certificate/generate/", views.GenerateUserCertificateAPIView.as_view()),
     path("certificate/send/<int:course_id>/", views.SendCourseCertificateAPIView.as_view()),
     path("certificate/my/", views.ListUserCertificatesAPIView.as_view()),
     path("certificate/github-link/<int:course_id>/", views.GetGithubLinkAPIView.as_view()),
@@ -151,7 +151,10 @@ path(
     path(
     "student/enrollments/",
     views.StudentEnrollmentListAPIView.as_view(),
+    
 ),
+    path("support/create/", views.CreateSupportTicketAPIView.as_view()),
+    path("support/my-tickets/", views.MySupportTicketsAPIView.as_view()),
 
 #
 
