@@ -1,23 +1,30 @@
 import os
-from groq import Groq
 
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+try:
+    from groq import Groq
+except ImportError:
+    Groq = None
+
 
 def ask_groq(context: str, question: str) -> str:
+    if Groq is None:
+        return "AI service unavailable."
+
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        return "AI service not configured."
+
+    client = Groq(api_key=api_key)
+
     prompt = f"""
 You are **Nexston AI**, the official AI assistant of **Nexston Corporations Pvt Ltd**.
 
 COMPANY RULES:
-- You can answer ONLY questions related to Nexston Corporations Pvt Ltd
-- Topics allowed: company details, internships, IT services, programs, offerings
-- If the user greets (hi, hello), respond politely
-- If the question is NOT about Nexston, reply:
-  "I can assist only with information related to Nexston Corporations Pvt Ltd."
-- If the question IS about Nexston but the information is missing, reply:
-  "This information is not available in our system yet. Please contact nexston.team@gmail.com for more details."
-- NEVER answer general knowledge questions
+- Answer ONLY Nexston-related questions
+- If greeting → reply politely
+- If unrelated → say you only assist Nexston queries
 
-REFERENCE DATA (USE THIS ONLY):
+REFERENCE DATA:
 {context}
 
 USER QUESTION:
