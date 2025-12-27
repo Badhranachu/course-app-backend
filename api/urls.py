@@ -127,6 +127,11 @@ path(
     # path("certificate/generate/", views.GenerateUserCertificateAPIView.as_view()),
     path("certificate/send/<int:course_id>/", views.SendCourseCertificateAPIView.as_view()),
     path("certificate/my/", views.ListUserCertificatesAPIView.as_view()),
+    path(
+    "my-certificate/download/<path:reference_number>/",
+    views.MyCertificateDownloadAPIView.as_view(),
+    name="my-certificate-download",
+),
     path("certificate/github-link/<int:course_id>/", views.GetGithubLinkAPIView.as_view()),
 
     # =========================

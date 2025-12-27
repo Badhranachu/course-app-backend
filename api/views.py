@@ -1064,9 +1064,10 @@ from .models import Certificate                # your model
 from .models import PreCertificate
 
 
+from django.urls import reverse
 
 class ListUserCertificatesAPIView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         certs = Certificate.objects.filter(user=request.user)
@@ -1077,15 +1078,31 @@ class ListUserCertificatesAPIView(APIView):
                 "course_name": c.course.title,
                 "github_link": c.github_link,
                 "certificate_url": request.build_absolute_uri(
-                    settings.MEDIA_URL + str(c.certificate_file)
+                    reverse("my-certificate-download", args=[c.reference_number])
                 )
             }
             for c in certs if c.certificate_file
         ])
 
 
+class MyCertificateDownloadAPIView(APIView):
+    permission_classes = [IsAuthenticated]
 
+    def get(self, request, reference_number):
+        try:
+            cert = Certificate.objects.get(
+                reference_number=reference_number,
+                user=request.user
+            )
+        except Certificate.DoesNotExist:
+            raise Http404("Certificate not found")
 
+        return FileResponse(
+            cert.certificate_file.open("rb"),
+            as_attachment=True,
+            filename=f"{reference_number}.pdf",
+        )
+    
 from api.models import StudentContentProgress,StudentModuleUnlock
 class CompleteVideoAPIView(APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -1487,13 +1504,26 @@ class CertificateDownloadAPIView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request, reference_number):
-        cert = Certificate.objects.get(reference_number=reference_number)
+        try:
+            cert = Certificate.objects.get(reference_number=reference_number)
+        except Certificate.DoesNotExist:
+            raise Http404("Certificate not found")
 
-        return FileResponse(
-            cert.certificate_file.open("rb"),
-            as_attachment=True,
-            filename=f"{reference_number}.pdf",
+        if not cert.certificate_file:
+            raise Http404("Certificate file not available")
+
+        # ✅ storage-safe (works for local + R2)
+        file = cert.certificate_file
+        file.open("rb")
+
+        response = FileResponse(
+            file,
+            content_type="application/pdf"
         )
+        response["Content-Disposition"] = (
+            f'attachment; filename="{reference_number}.pdf"'
+        )
+        return response
 
     
 from django.conf import settings
@@ -1703,3 +1733,24 @@ class MySupportTicketsAPIView(APIView):
         ]
 
         return Response(data)
+
+
+
+
+class MyCertificateDownloadAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, reference_number):
+        try:
+            cert = Certificate.objects.get(
+                reference_number=reference_number,
+                user=request.user   # 🔐 security
+            )
+        except Certificate.DoesNotExist:
+            raise Http404("Certificate not found")
+
+        return FileResponse(
+            cert.certificate_file.open("rb"),
+            as_attachment=True,
+            filename=f"{reference_number}.pdf",
+        )
