@@ -1,6 +1,12 @@
 from pathlib import Path
 import os
 from dotenv import load_dotenv
+load_dotenv()
+
+import pymysql
+pymysql.install_as_MySQLdb()
+
+
 
 # -------------------------------------------------
 # LOAD ENV
@@ -10,13 +16,11 @@ load_dotenv(BASE_DIR / ".env")
 R2_PUBLIC_URL = os.getenv("R2_PUBLIC_URL")
 
 
-import pymysql
-pymysql.install_as_MySQLdb()
 
 # -------------------------------------------------
 # BASIC SETTINGS (DEFINE FIRST)
 # -------------------------------------------------
-SECRET_KEY = os.getenv("SECRET_KEY")
+SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-local-dev-key")
 DEBUG = os.getenv("DEBUG", "False").lower() == "true"
 
 ALLOWED_HOSTS = [
@@ -106,8 +110,10 @@ MEDIA_ROOT = BASE_DIR / "media"
 
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
-STATICFILES_DIRS = [BASE_DIR / "static"]
-
+STATICFILES_DIRS = [
+    BASE_DIR / "api" / "static",
+]  
+#
 MEDIA_URL = f"{os.getenv('R2_PUBLIC_URL')}/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

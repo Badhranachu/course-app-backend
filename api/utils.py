@@ -276,7 +276,6 @@ def delayed_transfer_and_email(precert_id):
 
     file_field = precert.certificate_file
     filename = os.path.basename(file_field.name)
-
     ref_no = precert.reference_number
 
     # ---------- SEND EMAIL ----------
@@ -307,54 +306,35 @@ def delayed_transfer_and_email(precert_id):
         logger.exception("Email failed. Will retry.")
         return  # ❌ do nothing if email fails
 
-    # ---------- FINALIZE (CLOUDFLARE) ----------
+    # ---------- FINALIZE ----------
     try:
-        # Reference to stored file (PreCertificate FileField)
-        file_field = precert.certificate_file
-        filename = os.path.basename(file_field.name)
-        ref_no = precert.reference_number
-
-        # ---------- Upload to Cloudflare ----------
-        with file_field.open("rb") as f:
-            cloud_url = upload_pdf_to_r2(
-                f.read(),
-                f"certificates/{filename}"
-            )
-
-        # ---------- Save final certificate ----------
         Certificate.objects.update_or_create(
             user=user,
             course=course,
             defaults={
                 "github_link": precert.github_link,
-                "certificate_file": cloud_url,   # ✅ Cloudflare URL
+                "certificate_file": file_field,  # ✅ FileField
                 "reference_number": ref_no,
             },
         )
 
-        # ---------- CLEANUP (IMPORTANT) ----------
+        # ---------- CLEANUP LOCAL FILE ONLY ----------
+        try:
+            local_path = file_field.path
+            if os.path.exists(local_path):
+                os.remove(local_path)
+        except Exception:
+            logger.warning(
+                f"Failed to delete local temp file: {file_field.name}"
+            )
 
-        # 1️⃣ Delete Django FileField copy
-        file_field.delete(save=False)
-
-        # 2️⃣ Delete originally generated PDF (ReportLab file)
-        original_path = os.path.join(
-            settings.MEDIA_ROOT,
-            "certificates",
-            filename
-        )
-
-        if os.path.exists(original_path):
-            os.remove(original_path)
-
-        # 3️⃣ Delete PreCertificate row
+        # ---------- DELETE PRECERT ----------
         precert.delete()
 
-        logger.info(f"Certificate finalized in Cloudflare: {user.email}")
+        logger.info(f"Certificate finalized successfully: {user.email}")
 
     except Exception:
-        logger.exception("Cloudflare upload failed AFTER email")
-
+        logger.exception("Finalization failed AFTER email")
 
 
     
