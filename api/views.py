@@ -815,15 +815,40 @@ class AttachmentContentAPIView(APIView):
 class CourseVideosAPIView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
-    def get(self, request, course_id):
+    def get(self, request, course_id, video_id=None):
         course = get_object_or_404(Course, id=course_id)
 
-        if not Enrollment.objects.filter(user=request.user, course=course).exists():
-            return Response({"error": "You must enroll in this course"}, status=403)
+        if not Enrollment.objects.filter(
+            user=request.user,
+            course=course
+        ).exists():
+            return Response(
+                {"error": "You must enroll in this course"},
+                status=403
+            )
 
+        # 🔹 CASE 1: video_id provided → single video
+        if video_id is not None:
+            video = get_object_or_404(
+                Video,
+                id=video_id,
+                course=course
+            )
+            serializer = VideoSerializer(
+                video,
+                context={"request": request}
+            )
+            return Response(serializer.data)
+
+        # 🔹 CASE 2: no video_id → all videos
         videos = course.videos.all().order_by("id")
-        serializer = VideoSerializer(videos, many=True, context={"request": request})
+        serializer = VideoSerializer(
+            videos,
+            many=True,
+            context={"request": request}
+        )
         return Response(serializer.data)
+
 
 
 from api.utils import generate_certificate
@@ -1211,7 +1236,7 @@ class UpdateVideoProgressAPIView(APIView):
     # ==============================
     # GET → FETCH PROGRESS
     # ==============================
-    def get(self, request, course_id):
+    def get(self, request, course_id, video_id):
         user = request.user
         course = get_object_or_404(Course, id=course_id)
 
@@ -1220,52 +1245,48 @@ class UpdateVideoProgressAPIView(APIView):
         ).exists():
             return Response({"error": "Not enrolled"}, status=403)
 
-        videos = Video.objects.filter(course=course)
-        response = []
+        video = get_object_or_404(Video, id=video_id, course=course)
 
-        for video in videos:
-            # ✅ ENSURE DURATION EVEN IN GET
-            duration = ensure_video_duration(video)
+        # ✅ ENSURE DURATION EVEN IN GET
+        duration = ensure_video_duration(video)
 
-            progress = StudentVideoProgress.objects.filter(
-                user=user, video=video
-            ).first()
+        progress = StudentVideoProgress.objects.filter(
+            user=user, video=video
+        ).first()
 
-            watched = progress.watched_seconds if progress else 0
-            completed = progress.is_completed if progress else False
+        watched = progress.watched_seconds if progress else 0
+        completed = progress.is_completed if progress else False
 
-            percentage = (
-                int((watched / duration) * 100)
-                if duration > 0
-                else 0
-            )
+        percentage = (
+            int((watched / duration) * 100)
+            if duration > 0
+            else 0
+        )
 
-            response.append({
-                "video_id": video.id,
-                "title": video.title,
-                "duration": duration,
-                "watched_seconds": watched,
-                "progress_percent": percentage,
-                "last_position": progress.last_position if progress else 0,
-                "is_completed": completed,
-            })
+        return Response({
+            "video_id": video.id,
+            "title": video.title,
+            "duration": duration,
+            "watched_seconds": watched,
+            "progress_percent": percentage,
+            "last_position": progress.last_position if progress else 0,
+            "is_completed": completed,
+            "has_attachment": bool(video.folder_attachment),
 
-        return Response(response)
+        })
 
     # ==============================
     # POST → UPDATE PROGRESS
     # ==============================
-    def post(self, request, course_id):
+    def post(self, request, course_id, video_id):
         user = request.user
 
-        video_id = request.data.get("video_id")
-        current_time = request.data.get("current_time")
-
-        # 🔒 HARD SAFETY DEFAULT
-        current_time = int(current_time) if current_time is not None else 0
+        # ⏱ current time from frontend
+        current_time = int(request.data.get("current_time", 0))
 
         course = get_object_or_404(Course, id=course_id)
 
+        # 🔒 Enrollment check
         if not Enrollment.objects.filter(
             user=user,
             course=course,
@@ -1273,6 +1294,7 @@ class UpdateVideoProgressAPIView(APIView):
         ).exists():
             return Response({"error": "Not enrolled"}, status=403)
 
+        # 🎬 Video from URL (NOT request body)
         video = get_object_or_404(Video, id=video_id, course=course)
 
         module = get_object_or_404(
@@ -1292,70 +1314,54 @@ class UpdateVideoProgressAPIView(APIView):
             }
         )
 
-        # 🔥 HARD NULL SAFETY (CRITICAL)
-        if progress.watched_seconds is None:
-            progress.watched_seconds = 0
-
-        if progress.last_position is None:
-            progress.last_position = 0
+        # 🔥 HARD NULL SAFETY
+        progress.watched_seconds = progress.watched_seconds or 0
+        progress.last_position = progress.last_position or 0
 
         # ==============================
-        # 🔒 SAFE SYNC (NO NULLS)
+        # 🔒 SAFE SYNC
         # ==============================
         duration = ensure_video_duration(video)
+        capped_time = min(current_time, duration)
 
-        if duration and current_time >= int(duration * 0.9):
-            progress.watched_seconds = duration
-            progress.last_position = duration
-        else:
-            capped_time = min(current_time, duration)
-            progress.last_position = max(progress.last_position or 0, capped_time)
-            progress.watched_seconds = max(progress.watched_seconds or 0, capped_time)
+        progress.last_position = max(progress.last_position, capped_time)
+        progress.watched_seconds = max(progress.watched_seconds, capped_time)
 
-        # ==============================
-        # ✅ COMPLETION CHECK (90%)
-        # ==============================
         # ==============================
         # ✅ COMPLETION CHECK (>= 90%)
         # ==============================
-        if duration:
-            watched_percent = (progress.watched_seconds / duration) * 100
-        else:
-            watched_percent = 0
+        if duration and (progress.watched_seconds / duration) * 100 >= 90:
+            if not progress.is_completed:
+                progress.is_completed = True
+                progress.completed_at = timezone.now()
+                progress.last_position = duration
+                progress.watched_seconds = duration
 
-        if not progress.is_completed and watched_percent >= 90:
-            progress.is_completed = True
-            progress.completed_at = timezone.now()
-
-            # 🔒 force to full duration
-            progress.last_position = duration
-            progress.watched_seconds = duration
-
-            StudentContentProgress.objects.update_or_create(
-                user=user,
-                module=module,
-                defaults={
-                    "is_completed": True,
-                    "completed_at": timezone.now()
-                }
-            )
-
-            next_module = CourseModuleItem.objects.filter(
-                course=course,
-                order__gt=module.order
-            ).order_by("order").first()
-
-            if next_module:
-                StudentModuleUnlock.objects.update_or_create(
+                StudentContentProgress.objects.update_or_create(
                     user=user,
-                    module=next_module,
-                    defaults={"is_unlocked": True}
+                    module=module,
+                    defaults={
+                        "is_completed": True,
+                        "completed_at": timezone.now()
+                    }
                 )
-            else:
-                Enrollment.objects.filter(
-                    user=user,
-                    course=course
-                ).update(status="completed")
+
+                next_module = CourseModuleItem.objects.filter(
+                    course=course,
+                    order__gt=module.order
+                ).order_by("order").first()
+
+                if next_module:
+                    StudentModuleUnlock.objects.update_or_create(
+                        user=user,
+                        module=next_module,
+                        defaults={"is_unlocked": True}
+                    )
+                else:
+                    Enrollment.objects.filter(
+                        user=user,
+                        course=course
+                    ).update(status="completed")
 
         progress.save()
 
@@ -1365,6 +1371,7 @@ class UpdateVideoProgressAPIView(APIView):
             "last_position": progress.last_position,
             "is_completed": progress.is_completed
         })
+
 
 
 class CourseModuleProgressAPIView(APIView):
@@ -1788,3 +1795,43 @@ class ChatWithAIView(APIView):
             "question": question,
             "answer": answer
         })
+    
+
+
+class CourseVideoAllProgressAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, course_id):
+        # 🔐 ensure enrolled
+        if not Enrollment.objects.filter(
+            user=request.user,
+            course_id=course_id,
+            status="completed"
+        ).exists():
+            return Response({"error": "Not enrolled"}, status=403)
+
+        videos = Video.objects.filter(course_id=course_id)
+
+        progress_map = {
+            p.video_id: p
+            for p in StudentVideoProgress.objects.filter(
+                user=request.user,
+                video__course_id=course_id
+            )
+        }
+
+        data = []
+        for video in videos:
+            p = progress_map.get(video.id)
+
+            data.append({
+                "video_id": video.id,
+                "watched_seconds": p.watched_seconds if p else 0,
+                "duration": video.duration or 0,
+                "is_completed": p.is_completed if p else False,
+
+                # ✅ THIS IS THE IMPORTANT PART
+                "has_attachment": bool(video.folder_attachment),
+            })
+
+        return Response(data)

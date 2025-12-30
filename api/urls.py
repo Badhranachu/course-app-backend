@@ -21,6 +21,11 @@ urlpatterns = [
     path("courses/<int:pk>/", views.CourseDetailAPIView.as_view(), name="course-detail"),
     path("courses/<int:course_id>/modules/", views.CourseModulesAPIView.as_view()),
     path("courses/<int:course_id>/videos/", views.CourseVideosAPIView.as_view()),
+    path(
+    "courses/<int:course_id>/videos/<int:video_id>/",
+    views.CourseVideosAPIView.as_view(),
+    name="course-video-detail"
+    ),
 
 
 
@@ -35,19 +40,26 @@ urlpatterns = [
     # =========================
     # VIDEO
     # =========================
-path(
-    "courses/<int:course_id>/videos/<int:video_id>/stream/",
-    views.StreamVideoAPIView.as_view(),
-    name="video-stream",
-),
+# path(
+#     "courses/<int:course_id>/videos/<int:video_id>/stream/",
+#     views.StreamVideoAPIView.as_view(),
+#     name="video-stream",
+# ),
 
 
     #update video progress and get video progress
 path(
-    "courses/<int:course_id>/videos/progress/",
+    "courses/<int:course_id>/videos/<int:video_id>/progress/",
     views.UpdateVideoProgressAPIView.as_view(),
     name="video-progress"
 ),
+
+path(
+    "courses/<int:course_id>/all-videos/progress/",
+    views.CourseVideoAllProgressAPIView.as_view(),
+    name="course-video-progress"
+),
+
 
 
     # get module progres

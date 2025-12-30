@@ -62,26 +62,14 @@ class UserSignupSerializer(serializers.ModelSerializer):
 
 
 class VideoSerializer(serializers.ModelSerializer):
-    video_url = serializers.SerializerMethodField()
-    thumbnail = serializers.SerializerMethodField()
 
     class Meta:
         model = Video
-        fields = ['id', 'title', 'description', 'video_url', 'thumbnail', 'created_at']
+        fields = ['id', 'title', 'description', 'video_url', 'created_at']
 
-    def get_video_url(self, obj):
-        request = self.context.get('request')
-        if request and obj.id:
-            return request.build_absolute_uri(f'/api/videos/{obj.id}/stream/')
-        return None
+    
 
-    def get_thumbnail(self, obj):
-        request = self.context.get("request")
-
-        if request is None:
-            return "/static/default-thumb.png"
-
-        return request.build_absolute_uri("/static/default-thumb.png")
+    
 
 
 
@@ -148,7 +136,8 @@ class CourseModuleSerializer(serializers.ModelSerializer):
     description = serializers.SerializerMethodField()
     thumbnail = serializers.SerializerMethodField()
     item_id = serializers.SerializerMethodField()
-    attachment_url = serializers.SerializerMethodField()
+    has_attachment = serializers.SerializerMethodField()
+
 
     # ⭐ Computed field, NOT model field
     is_unlocked = serializers.SerializerMethodField()
@@ -163,9 +152,19 @@ class CourseModuleSerializer(serializers.ModelSerializer):
             "thumbnail",
             "item_id",
             "order",
-            "attachment_url",
+            "has_attachment",
             "is_unlocked",   # Now VALID
         ]
+
+    def get_has_attachment(self, obj):
+        if obj.item_type != "video" or not obj.video_id:
+            return False
+
+        return Video.objects.filter(
+            id=obj.video_id,
+            folder_attachment__isnull=False
+        ).exists()
+
 
     # ---------------------------------
     # TITLE
@@ -209,14 +208,7 @@ class CourseModuleSerializer(serializers.ModelSerializer):
     # ---------------------------------
     # ATTACHMENT URL (SAFE)
     # ---------------------------------
-    def get_attachment_url(self, obj):
-        if obj.item_type == "video" and obj.video and obj.video.folder_attachment:
-            request = self.context.get("request")
-            if request is None:
-                return obj.video.folder_attachment.url
-            return request.build_absolute_uri(obj.video.folder_attachment.url)
-        return None
-
+    
     # ---------------------------------
     # UNLOCK LOGIC HERE
     # ---------------------------------

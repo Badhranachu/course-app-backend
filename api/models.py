@@ -163,47 +163,30 @@ from moviepy.editor import VideoFileClip
 import tempfile
 import shutil
 import os
+from api.r2 import upload_video_to_r2
 class Video(models.Model):
     course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name="videos")
     title = models.CharField(max_length=200)
     description = models.TextField(blank=True)
-    video_file = models.FileField(upload_to="videos/")
-    folder_attachment = models.FileField(upload_to="video_folders/", blank=True, null=True)
+    folder_attachment = models.FileField(
+        upload_to="video_folders/",
+        blank=True,
+        null=True
+    )
+    
+
+    video_url = models.URLField(max_length=1000)
+
+
     duration = models.PositiveIntegerField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ["created_at"]
 
-    def save(self, *args, **kwargs):
-        super().save(*args, **kwargs)
-
-        if self.video_file and not self.duration:
-            tmp_path = None
-            try:
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
-                    tmp_path = tmp.name
-                    with self.video_file.open("rb") as src:
-                        shutil.copyfileobj(src, tmp)
-
-                clip = VideoFileClip(tmp_path)
-                self.duration = int(clip.duration)
-                clip.close()
-
-                super().save(update_fields=["duration"])
-
-            except Exception:
-                import traceback
-                traceback.print_exc()
-
-            finally:
-                if tmp_path and os.path.exists(tmp_path):
-                    try:
-                        os.remove(tmp_path)
-                    except Exception:
-                        pass
     def __str__(self):
         return f"{self.course.title} → {self.title}"
+
 
 
 # =====================================================
