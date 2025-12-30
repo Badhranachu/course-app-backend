@@ -1789,12 +1789,17 @@ class ChatWithAIView(APIView):
         context = get_prompt_context()
         answer = ask_groq(context, question)
 
-        save_user_chat(request.user.email, question, answer)
+        try:
+            save_user_chat(request.user.email, question, answer)
+        except Exception as e:
+            # Log only, do NOT break chat
+            print("Chat save failed:", e)
 
         return Response({
             "question": question,
             "answer": answer
         })
+
     
 
 

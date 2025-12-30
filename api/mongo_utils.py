@@ -37,22 +37,34 @@ def get_prompt_context():
 def sanitize_email(email):
     return re.sub(r"[^a-zA-Z0-9]", "_", email)
 
-
+import traceback
 def save_user_chat(email, question, answer):
     try:
         db = get_db()
-        if not db:
+        if db is None:
+
+            print("MongoDB not connected")
+            return
+
+        if not email:
+            print("Email is missing")
             return
 
         safe_name = sanitize_email(email)
-        collection = db[f"user_{safe_name}"]
+        collection_name = f"user_{safe_name}"
 
-        collection.insert_one({
+        print("Saving chat to collection:", collection_name)
+
+        db[collection_name].insert_one({
             "email": email,
             "question": question,
             "answer": answer,
             "timestamp": datetime.utcnow()
         })
 
-    except Exception:
-        pass
+        print("Chat saved successfully")
+
+    except Exception as e:
+        print("MongoDB SAVE ERROR:", e)
+        traceback.print_exc()
+    
