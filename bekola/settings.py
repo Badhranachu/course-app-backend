@@ -6,6 +6,13 @@ load_dotenv()
 import pymysql
 pymysql.install_as_MySQLdb()
 
+DATA_UPLOAD_MAX_MEMORY_SIZE = 2147483648
+FILE_UPLOAD_MAX_MEMORY_SIZE = 2147483648
+
+FILE_UPLOAD_HANDLERS = [
+    "django.core.files.uploadhandler.TemporaryFileUploadHandler",
+]
+
 
 
 # -------------------------------------------------
