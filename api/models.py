@@ -163,7 +163,6 @@ from moviepy.editor import VideoFileClip
 import tempfile
 import shutil
 import os
-from api.r2 import upload_video_to_r2
 class Video(models.Model):
     course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name="videos")
     title = models.CharField(max_length=200)
@@ -173,9 +172,10 @@ class Video(models.Model):
         blank=True,
         null=True
     )
-    
+        
+    source_video = models.FileField(upload_to="tmp_uploads/", null=True, blank=True)
+    video_url = models.URLField(max_length=1000, null=True, blank=True)
 
-    video_url = models.URLField(max_length=1000)
 
 
     duration = models.PositiveIntegerField(null=True, blank=True)

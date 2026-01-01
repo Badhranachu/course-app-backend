@@ -1186,47 +1186,17 @@ from moviepy.editor import VideoFileClip
 
 def ensure_video_duration(video):
     """
-    Calculate and save video duration ONLY if missing.
-    Windows-safe (no file lock issue).
+    Return video duration safely.
+    Duration must already be saved during upload/HLS processing.
     """
-    if video.duration:
+
+    if video.duration and video.duration > 0:
         return video.duration
 
-    if not video.video_file:
-        return 0
+  
 
-    tmp_path = None
+    return 0
 
-    try:
-        # 1️⃣ Create temp file path (not locked)
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
-            tmp_path = tmp.name
-            with video.video_file.open("rb") as src:
-                shutil.copyfileobj(src, tmp)
-
-        # 2️⃣ Now ffmpeg/moviepy can read it
-        clip = VideoFileClip(tmp_path)
-        duration = int(clip.duration)
-        clip.close()
-
-        # 3️⃣ Save duration
-        video.duration = duration
-        video.save(update_fields=["duration"])
-
-        return duration
-
-    except Exception:
-        import traceback
-        traceback.print_exc()
-        return 0
-
-    finally:
-        # 4️⃣ Cleanup temp file
-        if tmp_path and os.path.exists(tmp_path):
-            try:
-                os.remove(tmp_path)
-            except Exception:
-                pass
     
 MAX_FORWARD_SKIP = 1800  # ✅ 30 minutes (in seconds)
 
@@ -1778,29 +1748,56 @@ from rest_framework import status
 from api.mongo_utils import get_prompt_context, save_user_chat
 from api.groq_client import ask_groq
 class ChatWithAIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def post(self, request):
         question = request.data.get("question")
 
         if not question:
-            return Response({"error": "Question is required"}, status=400)
+            return Response(
+                {"error": "Question is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 🔐 AUTHENTICATED USER → UNLIMITED
+        if request.user.is_authenticated:
+            context = get_prompt_context()
+            answer = ask_groq(context, question)
+
+            try:
+                save_user_chat(request.user.email, question, answer)
+            except Exception as e:
+                print("Chat save failed:", e)
+
+            return Response({
+                "question": question,
+                "answer": answer
+            })
+
+        # 👤 GUEST USER → LIMIT = 2
+        session = request.session
+        guest_count = session.get("guest_ai_count", 0)
+
+        if guest_count >= 2:
+            return Response(
+                {
+                    "answer": "Sorry...Please log in to continue using Nexston AI."
+                },
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Increment guest usage
+        session["guest_ai_count"] = guest_count + 1
+        session.modified = True
 
         context = get_prompt_context()
         answer = ask_groq(context, question)
 
-        try:
-            save_user_chat(request.user.email, question, answer)
-        except Exception as e:
-            # Log only, do NOT break chat
-            print("Chat save failed:", e)
-
         return Response({
             "question": question,
-            "answer": answer
+            "answer": answer,
+            "remaining": 2 - session["guest_ai_count"]
         })
-
-    
 
 
 class CourseVideoAllProgressAPIView(APIView):

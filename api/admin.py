@@ -14,19 +14,14 @@ from .models import (
     Video,
 )
 
-from api.r2 import upload_video_to_r2
+# from api.r2 import upload_video_to_r2
 
 
 # =====================================================
 # VIDEO ADMIN FORM (Cloudflare R2 + Folder Attachment)
 # =====================================================
-
+from api.services.video_processor import process_video_to_hls
 class VideoAdminForm(forms.ModelForm):
-    video_file = forms.FileField(
-        required=False,
-        help_text="Upload video only when adding or replacing"
-    )
-
     class Meta:
         model = Video
         fields = (
@@ -34,46 +29,13 @@ class VideoAdminForm(forms.ModelForm):
             "title",
             "description",
             "folder_attachment",
+            "source_video",   # ✅ temp MP4
         )
 
-    def save(self, commit=True):
-        instance = super().save(commit=False)
-        video_file = self.cleaned_data.get("video_file")
 
-        # 🔹 Only upload if a NEW file is provided
-        if video_file:
-            import tempfile, os
-            from moviepy.editor import VideoFileClip
-            from api.r2 import upload_video_to_r2
+    
 
-            tmp_path = None
-            try:
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
-                    tmp_path = tmp.name
-                    for chunk in video_file.chunks():
-                        tmp.write(chunk)
-
-                # Upload to Cloudflare
-                with open(tmp_path, "rb") as f:
-                    instance.video_url = upload_video_to_r2(
-                        f,
-                        folder=f"course-{instance.course.id}"
-                    )
-
-                # Extract duration
-                clip = VideoFileClip(tmp_path)
-                instance.duration = int(clip.duration)
-                clip.close()
-
-            finally:
-                if tmp_path and os.path.exists(tmp_path):
-                    os.remove(tmp_path)
-
-        if commit:
-            instance.save()
-
-        return instance
-
+    
 
 # =====================================================
 # VIDEO ADMIN
@@ -88,6 +50,7 @@ class VideoAdmin(admin.ModelAdmin):
         "course",
         "title",
         "duration",
+        "video_url",
         "created_at",
     )
 
@@ -95,21 +58,29 @@ class VideoAdmin(admin.ModelAdmin):
     list_filter = ("course",)
 
     readonly_fields = (
-        "video_url",
         "duration",
         "created_at",
+        "video_url",
     )
 
     fields = (
         "course",
         "title",
         "description",
-        "video_file",
+        "source_video",      # ✅ FIX
         "video_url",
         "folder_attachment",
         "duration",
         "created_at",
     )
+
+    def save_model(self, request, obj, form, change):
+        # 1️⃣ Save first (video_url can be NULL)
+        super().save_model(request, obj, form, change)
+
+        # 2️⃣ Convert ONLY when new MP4 is uploaded
+        if "source_video" in form.changed_data and obj.source_video:
+            process_video_to_hls(obj)
 
 
 # =====================================================

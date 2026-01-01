@@ -60,12 +60,19 @@ class UserSignupSerializer(serializers.ModelSerializer):
 
         return user
 
-
 class VideoSerializer(serializers.ModelSerializer):
-
     class Meta:
         model = Video
-        fields = ['id', 'title', 'description', 'video_url', 'created_at']
+        fields = ["id", "title", "description", "video_url", "created_at"]
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+
+        # 🔒 SAFETY: block MP4 URLs
+        if data["video_url"] and not data["video_url"].endswith(".m3u8"):
+            data["video_url"] = None
+
+        return data
 
     
 
