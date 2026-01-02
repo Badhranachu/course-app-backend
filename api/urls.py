@@ -176,6 +176,16 @@ path(
 
 
     path("chat/", views.ChatWithAIView.as_view(), name="chat-with-ai"),
+    # api/urls.py
+    path("me/", views.MeAPIView.as_view()),
+    path("admin-videos/upload/", views.VideoUploadAPIView.as_view()),
+    path("admin-videos/<int:video_id>/status/", views.VideoStatusAPIView.as_view()),
+
+
+
+
+
+    
 
 
 #

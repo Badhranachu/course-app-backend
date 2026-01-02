@@ -1837,3 +1837,83 @@ class CourseVideoAllProgressAPIView(APIView):
             })
 
         return Response(data)
+    
+
+
+
+# api/views.py
+from rest_framework.views import APIView
+from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from .models import Video
+from api.services.video_processor import process_video_to_hls
+from api.permissions import IsAdminUserRole
+
+from rest_framework.views import APIView
+from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework import status
+
+class VideoUploadAPIView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminUserRole]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        course_id = request.data.get("course")
+        title = request.data.get("title")
+        source_video = request.FILES.get("source_video")
+
+        if not all([course_id, title, source_video]):
+            return Response(
+                {"error": "course, title and source_video are required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        video = Video.objects.create(
+            course_id=course_id,
+            title=title,
+            description=request.data.get("description", ""),
+            source_video=source_video,
+            status="processing",
+        )
+
+        # 🔥 Run heavy work in background
+        from threading import Thread
+        Thread(target=process_video_to_hls, args=(video.id,)).start()
+
+        return Response({
+            "video_id": video.id,
+            "status": "processing",
+            "message": "Upload completed. Processing started."
+        }, status=status.HTTP_201_CREATED)
+
+
+
+    
+
+class MeAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        return Response({
+            "email": user.email,
+            "role": user.role,
+            "is_admin": user.role == "admin",
+        })
+
+
+
+
+class VideoStatusAPIView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminUserRole]
+
+    def get(self, request, video_id):
+        video = get_object_or_404(Video, id=video_id)
+
+        return Response({
+            "status": video.status,
+            "video_url": video.video_url,
+        })
