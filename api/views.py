@@ -1879,30 +1879,15 @@ class VideoUploadAPIView(APIView):
             status="processing",
         )
 
-        # 🔥 Run heavy work in background
+        # background processing
         from threading import Thread
-        Thread(target=process_video_to_hls, args=(video.id,)).start()
+        Thread(target=process_video_to_hls, args=(video.id,), daemon=True).start()
 
         return Response({
             "video_id": video.id,
             "status": "processing",
             "message": "Upload completed. Processing started."
         }, status=status.HTTP_201_CREATED)
-
-
-
-    
-
-class MeAPIView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        user = request.user
-        return Response({
-            "email": user.email,
-            "role": user.role,
-            "is_admin": user.role == "admin",
-        })
 
 
 
@@ -1917,6 +1902,7 @@ class VideoStatusAPIView(APIView):
             "status": video.status,
             "video_url": video.video_url,
         })
+
 
 
 class CourseListAPIView(APIView):
