@@ -1917,3 +1917,12 @@ class VideoStatusAPIView(APIView):
             "status": video.status,
             "video_url": video.video_url,
         })
+
+
+class CourseListAPIView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminUserRole]
+
+    def get(self, request):
+        return Response(
+            Course.objects.all().values("id", "title")
+        )
