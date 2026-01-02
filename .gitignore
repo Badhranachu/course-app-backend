@@ -11,3 +11,10 @@ staticfiles/
 .DS_Store
 certificates/
 
+venv/
+__pycache__/
+*.pyc
+.env
+media/
+staticfiles/
+celerybeat-schedule

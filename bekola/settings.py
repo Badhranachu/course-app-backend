@@ -2,6 +2,10 @@ from pathlib import Path
 import os
 from dotenv import load_dotenv
 load_dotenv()
+import os
+
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL")
+CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND")
 
 import pymysql
 pymysql.install_as_MySQLdb()
@@ -53,7 +57,8 @@ INSTALLED_APPS = [
     "corsheaders",
 
     "storages",   # MUST be before api
-    "api.apps.ApiConfig"
+    "api.apps.ApiConfig",
+    "django_celery_results"
 ]
 
 # -------------------------------------------------
@@ -229,3 +234,13 @@ RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET")
 
 USE_TZ = False
 TIME_ZONE = "Asia/Kolkata"
+
+
+# # ===============================
+# # CELERY CONFIG
+# # ===============================
+CELERY_BROKER_URL = "redis://127.0.0.1:6379/0"
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_BACKEND = "django-db"
+CELERY_TIMEZONE = "Asia/Kolkata"

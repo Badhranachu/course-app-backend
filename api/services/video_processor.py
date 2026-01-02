@@ -27,37 +27,28 @@ def process_video_to_hls(video_id):
 
         playlist_path = os.path.join(hls_dir, "playlist.m3u8")
 
-        cmd = [
-            "ffmpeg", "-y",
-            "-i", local_input_path,
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-crf", "23",
-            "-pix_fmt", "yuv420p",
-            "-c:a", "aac",
-            "-hls_time", "4",
-            "-hls_list_size", "0",
-            "-hls_flags", "independent_segments",
-            "-hls_segment_filename", f"{hls_dir}/segment_%03d.ts",
-            playlist_path,
-        ]
-
-        subprocess.run(cmd, check=True)
+        subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-i", local_input_path,
+                "-c:v", "libx264",
+                "-preset", "veryfast",
+                "-crf", "23",
+                "-pix_fmt", "yuv420p",
+                "-c:a", "aac",
+                "-hls_time", "4",
+                "-hls_list_size", "0",
+                "-hls_flags", "independent_segments",
+                "-hls_segment_filename", f"{hls_dir}/segment_%03d.ts",
+                playlist_path,
+            ],
+            check=True,
+        )
 
         r2_folder = f"videos/course-{video.course.id}/{lesson_id}"
         playlist_url = upload_hls_folder_to_r2(hls_dir, r2_folder)
 
-        video.video_url = playlist_url
-        video.status = "ready"
-        video.source_video.delete(save=False)
-        video.source_video = None
-        video.save(update_fields=["video_url", "status", "source_video"])
-
-    except Exception:
-        video.status = "failed"
-        video.save(update_fields=["status"])
-        import traceback
-        traceback.print_exc()
+        return playlist_url   # ✅ IMPORTANT
 
     finally:
         if local_input_path and os.path.exists(local_input_path):

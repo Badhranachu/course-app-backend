@@ -1856,6 +1856,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 
+from api.tasks import process_video_task   # Celery task
+
 class VideoUploadAPIView(APIView):
     permission_classes = [IsAuthenticated, IsAdminUserRole]
     parser_classes = [MultiPartParser, FormParser]
@@ -1871,26 +1873,26 @@ class VideoUploadAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        # ✅ create video in QUEUED state
         video = Video.objects.create(
             course_id=course_id,
             title=title,
             description=request.data.get("description", ""),
             source_video=source_video,
-            status="processing",
+            status="queued",
         )
 
-        # background processing
-        from threading import Thread
-        Thread(target=process_video_to_hls, args=(video.id,), daemon=True).start()
+        # ✅ enqueue Celery job (NO THREAD)
+        process_video_task.delay(video.id)
 
-        return Response({
-            "video_id": video.id,
-            "status": "processing",
-            "message": "Upload completed. Processing started."
-        }, status=status.HTTP_201_CREATED)
-
-
-
+        return Response(
+            {
+                "video_id": video.id,
+                "status": "queued",
+                "message": "Upload completed. Processing queued."
+            },
+            status=status.HTTP_201_CREATED
+        )
 
 class VideoStatusAPIView(APIView):
     permission_classes = [IsAuthenticated, IsAdminUserRole]
