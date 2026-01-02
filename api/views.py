@@ -1914,3 +1914,73 @@ class CourseListAPIView(APIView):
         return Response(
             Course.objects.all().values("id", "title")
         )
+    
+
+
+import uuid
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+import boto3
+from django.conf import settings
+
+class R2PresignedUploadView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        filename = request.data.get("filename")
+        content_type = request.data.get("content_type")
+
+        if not filename:
+            return Response({"error": "filename required"}, status=400)
+
+        ext = filename.split(".")[-1]
+        key = f"uploads/raw/{uuid.uuid4()}.{ext}"
+
+        s3 = boto3.client(
+            "s3",
+            region_name="auto",
+            endpoint_url=settings.AWS_S3_ENDPOINT_URL,
+            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+        )
+
+        url = s3.generate_presigned_url(
+            ClientMethod="put_object",
+            Params={
+                "Bucket": settings.AWS_STORAGE_BUCKET_NAME,
+                "Key": key,
+                "ContentType": content_type,
+            },
+            ExpiresIn=3600,
+        )
+
+        return Response({
+            "upload_url": url,
+            "key": key,
+            "public_url": f"{settings.R2_PUBLIC_URL}/{key}",
+        })
+
+
+
+from api.models import Video
+from api.tasks import process_video_task
+
+class AdminVideoCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        video = Video.objects.create(
+            title=request.data["title"],
+            description=request.data.get("description", ""),
+            course_id=request.data["course"],
+            source_video=request.data["r2_key"],  # store key only
+            status="queued",
+        )
+
+        process_video_task.delay(video.id)
+
+        return Response({
+            "video_id": video.id,
+            "status": "queued"
+        })

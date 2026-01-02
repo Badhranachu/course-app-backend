@@ -139,3 +139,30 @@ def upload_hls_folder_to_r2(local_hls_dir, r2_folder):
         raise RuntimeError("playlist.m3u8 not found during upload")
 
     return f"{R2_PUBLIC_URL}/{playlist_key}"
+
+
+
+import tempfile
+import os
+from django.core.files.storage import default_storage
+
+
+def download_from_r2(r2_key: str) -> str:
+    """
+    Downloads a file from Cloudflare R2 to a local temp file
+    and returns the local file path.
+
+    :param r2_key: Path/key of the file in R2 (e.g. uploads/video.mp4)
+    :return: local file path
+    """
+
+    if not default_storage.exists(r2_key):
+        raise FileNotFoundError(f"R2 object not found: {r2_key}")
+
+    suffix = os.path.splitext(r2_key)[1] or ".mp4"
+
+    with default_storage.open(r2_key, "rb") as remote_file:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            for chunk in remote_file:
+                tmp.write(chunk)
+            return tmp.name
