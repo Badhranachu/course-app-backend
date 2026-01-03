@@ -57,7 +57,7 @@ def process_video_to_hls(video: Video) -> str:
         logger.info("Starting FFmpeg conversion")
 
         cmd = [
-            "ffmpeg", "-y",
+            "/usr/bin/ffmpeg", "-y",
             "-i", local_input,
             "-c:v", "libx264",
             "-preset", "veryfast",
@@ -72,6 +72,7 @@ def process_video_to_hls(video: Video) -> str:
             "-progress", "pipe:1",
             "-nostats",
         ]
+
 
 
         process = subprocess.Popen(
