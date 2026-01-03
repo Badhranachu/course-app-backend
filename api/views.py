@@ -2035,103 +2035,156 @@ s3 = boto3.client(
     aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
 )
 
-class UploadHLSZipAPIView(APIView):
+import os
+import zipfile
+import tempfile
+import shutil
+import logging
+
+from django.conf import settings
+from django.http import JsonResponse
+from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated
+
+import boto3
+
+from .models import Video, Course
+
+logger = logging.getLogger(__name__)
+
+
+class AdminVideoUploadZipAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        zip_file = request.FILES.get("zip")
-        title = request.data.get("title")
-        description = request.data.get("description")
-        course_id = request.data.get("course")
-
         logger.info("📦 Upload request received")
 
-        if not zip_file or not zip_file.name.endswith(".zip"):
-            logger.warning("❌ Invalid or missing ZIP file")
-            return Response({"error": "ZIP file required"}, status=400)
+        zip_file = request.FILES.get("file")
+        course_id = request.data.get("course_id")
+        title = request.data.get("title", "Video")
 
+        if not zip_file or not course_id:
+            return JsonResponse({"error": "Missing file or course_id"}, status=400)
+
+        course = Course.objects.get(id=course_id)
+
+        # --------------------------------------------------
+        # 1️⃣ Create DB record early
+        # --------------------------------------------------
+        video = Video.objects.create(
+            course=course,
+            title=title,
+            playlist_url=""
+        )
+
+        lesson_key = f"lesson_{video.id}"
+
+        # --------------------------------------------------
+        # 2️⃣ Upload ZIP FIRST to R2
+        # --------------------------------------------------
+        s3 = boto3.client(
+            "s3",
+            endpoint_url=settings.R2_ENDPOINT,
+            aws_access_key_id=settings.R2_ACCESS_KEY,
+            aws_secret_access_key=settings.R2_SECRET_KEY,
+            region_name="auto",
+        )
+
+        zip_r2_key = f"videos/course-{course.id}/{lesson_key}/original.zip"
+
+        logger.info("☁️ Uploading ZIP to R2: %s", zip_r2_key)
+
+        s3.upload_fileobj(
+            zip_file,
+            settings.R2_BUCKET,
+            zip_r2_key,
+            ExtraArgs={"ContentType": "application/zip"},
+        )
+
+        # --------------------------------------------------
+        # 3️⃣ Download ZIP to TEMP
+        # --------------------------------------------------
         temp_dir = tempfile.mkdtemp()
-        logger.info(f"📁 Temp directory created: {temp_dir}")
+        zip_path = os.path.join(temp_dir, "video.zip")
 
-        try:
-            # 1️⃣ Extract ZIP
-            logger.info("📂 Extracting ZIP...")
-            with zipfile.ZipFile(zip_file) as z:
-                z.extractall(temp_dir)
-            logger.info("✅ ZIP extracted successfully")
+        logger.info("⬇️ Downloading ZIP from R2")
 
-            # 2️⃣ Find module folder
-            extracted_items = os.listdir(temp_dir)
-            logger.info(f"📦 Extracted items: {extracted_items}")
+        s3.download_file(settings.R2_BUCKET, zip_r2_key, zip_path)
 
-            if len(extracted_items) != 1:
-                logger.error("❌ ZIP must contain exactly one module folder")
-                return Response(
-                    {"error": "ZIP must contain exactly ONE module folder"},
-                    status=400
+        # --------------------------------------------------
+        # 4️⃣ Extract ZIP
+        # --------------------------------------------------
+        logger.info("📂 Extracting ZIP")
+
+        with zipfile.ZipFile(zip_path, "r") as zip_ref:
+            zip_ref.extractall(temp_dir)
+
+        # --------------------------------------------------
+        # 5️⃣ Find HLS root (master.m3u8)
+        # --------------------------------------------------
+        hls_root = None
+
+        for root, dirs, files in os.walk(temp_dir):
+            if "master.m3u8" in files:
+                hls_root = root
+                break
+
+        if not hls_root:
+            shutil.rmtree(temp_dir)
+            return JsonResponse({"error": "master.m3u8 not found"}, status=400)
+
+        logger.info("🎬 HLS root found: %s", hls_root)
+
+        # --------------------------------------------------
+        # 6️⃣ Upload extracted HLS folder to R2
+        # --------------------------------------------------
+        base_r2_path = f"videos/course-{course.id}/{lesson_key}/hls"
+
+        for root, dirs, files in os.walk(hls_root):
+            for file in files:
+                local_path = os.path.join(root, file)
+                relative_path = os.path.relpath(local_path, hls_root)
+
+                r2_key = f"{base_r2_path}/{relative_path}"
+
+                content_type = (
+                    "application/vnd.apple.mpegurl"
+                    if file.endswith(".m3u8")
+                    else "video/MP2T"
                 )
 
-            module_name = extracted_items[0]
-            module_path = os.path.join(temp_dir, module_name)
+                logger.info("⬆️ Uploading: %s", r2_key)
 
-            if not os.path.isdir(module_path):
-                logger.error("❌ Module path is not a directory")
-                return Response({"error": "Invalid module structure"}, status=400)
+                s3.upload_file(
+                    local_path,
+                    settings.R2_BUCKET,
+                    r2_key,
+                    ExtraArgs={"ContentType": content_type},
+                )
 
-            logger.info(f"📁 Module detected: {module_name}")
+        # --------------------------------------------------
+        # 7️⃣ Cleanup TEMP
+        # --------------------------------------------------
+        shutil.rmtree(temp_dir)
+        logger.info("🧹 Temp directory cleaned")
 
-            # 3️⃣ Validate master.m3u8
-            master_path = os.path.join(module_path, "master.m3u8")
-            if not os.path.exists(master_path):
-                logger.error("❌ master.m3u8 not found")
-                return Response({"error": "master.m3u8 not found"}, status=400)
+        # --------------------------------------------------
+        # 8️⃣ Save final playlist URL
+        # --------------------------------------------------
+        playlist_url = (
+            f"{settings.R2_PUBLIC_BASE_URL}/"
+            f"videos/course-{course.id}/{lesson_key}/hls/master.m3u8"
+        )
 
-            logger.info("🎬 master.m3u8 found")
+        video.playlist_url = playlist_url
+        video.save()
 
-            # 4️⃣ Create DB record
-            video = Video.objects.create(
-                title=title,
-                description=description,
-                course_id=course_id,
-                status="processing",
-            )
+        logger.info("🎉 Video ready | URL saved: %s", playlist_url)
 
-            logger.info(f"📝 Video DB record created (id={video.id})")
-
-            lesson_id = f"lesson_{video.id}"
-
-            # 5️⃣ Upload to Cloudflare R2
-            r2_base = f"videos/course-{course_id}/{lesson_id}/{module_name}"
-            logger.info(f"☁️ Uploading files to R2 path: {r2_base}")
-
-            upload_folder_recursive_to_r2(
-                local_folder=module_path,
-                r2_prefix=r2_base,
-            )
-
-            logger.info("✅ Upload to Cloudflare R2 completed")
-
-            # 6️⃣ Save final URL
-            playlist_url = (
-                os.getenv("R2_PUBLIC_URL").rstrip("/") +
-                f"/{r2_base}/master.m3u8"
-            )
-
-            video.video_url = playlist_url
-            video.status = "ready"
-            video.save(update_fields=["video_url", "status"])
-
-            logger.info(f"🎉 Video ready | URL saved: {playlist_url}")
-
-            return Response({
-                "status": "ready",
-                "playlist_url": playlist_url
-            })
-
-        except Exception as e:
-            logger.exception("🔥 Upload failed due to error")
-            return Response({"error": "Upload failed"}, status=500)
-
-        finally:
-            shutil.rmtree(temp_dir, ignore_errors=True)
-            logger.info("🧹 Temp directory cleaned")
+        return JsonResponse(
+            {
+                "message": "Video uploaded successfully",
+                "playlist_url": playlist_url,
+            },
+            status=200,
+        )

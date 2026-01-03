@@ -187,7 +187,7 @@ path(
     
     path("admin-videos/presign/", views.R2PresignedUploadView.as_view()),
     path("admin-videos/create/", views.AdminVideoCreateView.as_view()),
-    path("admin-videos/upload-zip/", views.UploadHLSZipAPIView.as_view()),
+    path("admin-videos/upload-zip/", views.AdminVideoUploadZipAPIView.as_view()),
 
 
     #
