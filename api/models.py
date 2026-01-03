@@ -179,20 +179,13 @@ class Video(models.Model):
         null=True
     )
         
-    source_video = models.FileField(upload_to="tmp_uploads/", null=True, blank=True)
     video_url = models.URLField(max_length=1000, null=True, blank=True)
     status = models.CharField(
         max_length=20,
         choices=STATUS_CHOICES,
         default="uploaded",
     )
-    stage = models.CharField(
-        max_length=30,
-        default="waiting"
-    )
-    progress = models.IntegerField(default=0)
-
-    log = models.TextField(blank=True, default="")
+    
 
 
 

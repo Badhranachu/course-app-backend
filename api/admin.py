@@ -5,7 +5,6 @@ import tempfile
 import shutil
 import os
 
-from moviepy.editor import VideoFileClip
 
 from .models import (
     Course,
@@ -20,7 +19,6 @@ from .models import (
 # =====================================================
 # VIDEO ADMIN FORM (Cloudflare R2 + Folder Attachment)
 # =====================================================
-from api.services.video_processor import process_video_to_hls
 class VideoAdminForm(forms.ModelForm):
     class Meta:
         model = Video
@@ -29,7 +27,6 @@ class VideoAdminForm(forms.ModelForm):
             "title",
             "description",
             "folder_attachment",
-            "source_video",   # ✅ temp MP4
         )
 
 
@@ -67,21 +64,13 @@ class VideoAdmin(admin.ModelAdmin):
         "course",
         "title",
         "description",
-        "source_video",      # ✅ FIX
         "video_url",
         "folder_attachment",
         "duration",
         "created_at",
     )
 
-    def save_model(self, request, obj, form, change):
-        # 1️⃣ Save first (video_url can be NULL)
-        super().save_model(request, obj, form, change)
-
-        # 2️⃣ Convert ONLY when new MP4 is uploaded
-        if "source_video" in form.changed_data and obj.source_video:
-            process_video_to_hls(obj)
-
+   
 
 # =====================================================
 # AUTO-REGISTER ALL OTHER MODELS

@@ -176,7 +176,7 @@ REST_FRAMEWORK = {
 # -------------------------------------------------
 # CORS & CSRF
 # -------------------------------------------------
-CORS_ALLOW_ALL_ORIGINS = False
+CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
 
 CORS_ALLOWED_ORIGINS = [
@@ -254,3 +254,18 @@ CELERY_TIMEZONE = "Asia/Kolkata"
 # Celery hard timeout increased 50%+
 CELERY_TASK_TIME_LIMIT = 60 * 60 * 6      # 6 hours
 CELERY_TASK_SOFT_TIME_LIMIT = 60 * 60 * 5 # 5 hours
+
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": "INFO",
+    },
+}

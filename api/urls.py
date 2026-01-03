@@ -1,5 +1,4 @@
 from django.urls import path
-from rest_framework_simplejwt.views import TokenRefreshView
 from api import views
 
 urlpatterns = [
@@ -188,7 +187,8 @@ path(
     
     path("admin-videos/presign/", views.R2PresignedUploadView.as_view()),
     path("admin-videos/create/", views.AdminVideoCreateView.as_view()),
-    path("admin-videos/<int:video_id>/status/", views.VideoStatusAPIView.as_view()),
+    path("admin-videos/upload-zip/", views.UploadHLSZipAPIView.as_view()),
+
 
     #
 

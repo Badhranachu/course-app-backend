@@ -28,124 +28,51 @@ import uuid
 import boto3
 
 
-# def upload_video_to_r2(file, folder):
-#     # 🔹 Read directly from .env
-#     R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
-#     R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
-#     R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME")
-#     R2_ACCOUNT_ID = os.getenv("R2_ACCOUNT_ID")
-#     R2_PUBLIC_URL = os.getenv("R2_PUBLIC_URL")
-
-#     R2_ENDPOINT_URL = f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-
-#     # 🔒 Safety check
-#     if not all([
-#         R2_ACCESS_KEY_ID,
-#         R2_SECRET_ACCESS_KEY,
-#         R2_BUCKET_NAME,
-#         R2_ACCOUNT_ID,
-#         R2_PUBLIC_URL,
-#     ]):
-#         raise ValueError("Missing Cloudflare R2 environment variables")
-
-#     s3 = boto3.client(
-#         "s3",
-#         endpoint_url=R2_ENDPOINT_URL,
-#         aws_access_key_id=R2_ACCESS_KEY_ID,
-#         aws_secret_access_key=R2_SECRET_ACCESS_KEY,
-#         region_name="auto",
-#     )
-
-#     # File name
-#     ext = file.name.rsplit(".", 1)[-1].lower()
-#     key = f"{folder}/{uuid.uuid4()}.{ext}"
-
-#     # IMPORTANT for admin uploads
-#     file.seek(0)
-
-#     s3.upload_fileobj(
-#         file,
-#         R2_BUCKET_NAME,
-#         key,
-#         ExtraArgs={
-#             "ContentType": "video/mp4"
-#         }
-
-#     )
-
-#     return f"{R2_PUBLIC_URL}/{key}"
-
-
 import os
 import boto3
+import mimetypes
+import logging
 
-def upload_hls_folder_to_r2(local_hls_dir, r2_folder, video=None):
-    """
-    Uploads all HLS files (.m3u8, .ts) in a folder to Cloudflare R2
-    Optionally updates Video.progress during upload
-    Returns public playlist.m3u8 URL
-    """
+logger = logging.getLogger(__name__)
 
-    R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
-    R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
-    R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME")
-    R2_ACCOUNT_ID = os.getenv("R2_ACCOUNT_ID")
-    R2_PUBLIC_URL = os.getenv("R2_PUBLIC_URL")
 
-    if not all([
-        R2_ACCESS_KEY_ID,
-        R2_SECRET_ACCESS_KEY,
-        R2_BUCKET_NAME,
-        R2_ACCOUNT_ID,
-        R2_PUBLIC_URL,
-    ]):
-        raise ValueError("Missing Cloudflare R2 environment variables")
+def upload_folder_recursive_to_r2(local_folder, r2_prefix):
+    logger.info("☁️ Initializing Cloudflare R2 client")
 
     s3 = boto3.client(
         "s3",
-        endpoint_url=f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com",
-        aws_access_key_id=R2_ACCESS_KEY_ID,
-        aws_secret_access_key=R2_SECRET_ACCESS_KEY,
+        endpoint_url=f"https://{os.getenv('R2_ACCOUNT_ID')}.r2.cloudflarestorage.com",
+        aws_access_key_id=os.getenv("R2_ACCESS_KEY_ID"),
+        aws_secret_access_key=os.getenv("R2_SECRET_ACCESS_KEY"),
         region_name="auto",
     )
 
-    files = [
-        f for f in os.listdir(local_hls_dir)
-        if f.endswith(".ts") or f.endswith(".m3u8")
-    ]
+    bucket = os.getenv("R2_BUCKET_NAME")
 
-    total_files = len(files)
-    uploaded = 0
-    playlist_key = None
+    for root, _, files in os.walk(local_folder):
+        for file in files:
+            local_path = os.path.join(root, file)
+            rel_path = os.path.relpath(local_path, local_folder)
+            r2_key = f"{r2_prefix}/{rel_path}".replace("\\", "/")
 
-    for filename in files:
-        file_path = os.path.join(local_hls_dir, filename)
+            logger.info(f"⬆️ Uploading: {r2_key}")
 
-        if filename.endswith(".m3u8"):
-            content_type = "application/x-mpegURL"
-            playlist_key = f"{r2_folder}/{filename}"
-        else:
-            content_type = "video/MP2T"
+            extra = {}
+            if file.endswith(".m3u8"):
+                extra["ContentType"] = "application/vnd.apple.mpegurl"
+            elif file.endswith(".ts"):
+                extra["ContentType"] = "video/mp2t"
 
-        s3.upload_file(
-            file_path,
-            R2_BUCKET_NAME,
-            f"{r2_folder}/{filename}",
-            ExtraArgs={"ContentType": content_type},
-        )
+            s3.upload_file(
+                local_path,
+                bucket,
+                r2_key,
+                ExtraArgs=extra
+            )
 
-        uploaded += 1
+    logger.info("☁️ All files uploaded to R2")
 
-        # 🔹 Update progress (HLS upload stage)
-        if video:
-            percent = int((uploaded / total_files) * 100)
-            video.progress = percent
-            video.save(update_fields=["progress"])
 
-    if not playlist_key:
-        raise RuntimeError("playlist.m3u8 not found during upload")
-
-    return f"{R2_PUBLIC_URL}/{playlist_key}"
 
 
 

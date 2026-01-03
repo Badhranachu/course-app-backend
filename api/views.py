@@ -1847,7 +1847,6 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from .models import Video
-from api.services.video_processor import process_video_to_hls
 from api.permissions import IsAdminUserRole
 
 from rest_framework.views import APIView
@@ -1856,7 +1855,6 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 
-from api.tasks import process_video_task   # Celery task
 
 class VideoUploadAPIView(APIView):
     permission_classes = [IsAuthenticated, IsAdminUserRole]
@@ -1955,45 +1953,185 @@ class R2PresignedUploadView(APIView):
 
 
 from api.models import Video
-from api.tasks import process_video_task
 
+# views.py
 class AdminVideoCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        playlist_url = request.data["playlist_url"]
+
+        if not playlist_url.endswith(".m3u8"):
+            return Response({"error": "Invalid HLS playlist"}, status=400)
+
         video = Video.objects.create(
             title=request.data["title"],
             description=request.data.get("description", ""),
             course_id=request.data["course"],
-            source_video=request.data["r2_key"],  # store key only
-            status="queued",
+            video_url=playlist_url,
+            status="ready",
         )
-
-        process_video_task.delay(video.id)
 
         return Response({
             "video_id": video.id,
-            "status": "queued"
+            "status": "ready",
+            "video_url": video.video_url,
         })
 
 
 
+
+
+
+
+import os, uuid, zipfile, boto3
+from pathlib import Path
+from django.conf import settings
 from rest_framework.views import APIView
-from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from django.shortcuts import get_object_or_404
+from rest_framework.response import Response
 from api.models import Video
 
+TMP_DIR = "/tmp/hls"
 
-class VideoStatusAPIView(APIView):
+s3 = boto3.client(
+    "s3",
+    region_name="auto",
+    endpoint_url=settings.AWS_S3_ENDPOINT_URL,
+    aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+    aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+)
+
+import os
+import uuid
+import zipfile
+import boto3
+import logging
+from pathlib import Path
+
+from django.conf import settings
+from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+
+from api.models import Video
+from api.r2 import upload_folder_recursive_to_r2
+
+# -------------------------
+# LOGGER
+# -------------------------
+logger = logging.getLogger(__name__)
+
+TMP_DIR = "/tmp/hls"  # change to C:/temp/hls on Windows if needed
+
+# -------------------------
+# CLOUDFLARE R2 CLIENT
+# -------------------------
+s3 = boto3.client(
+    "s3",
+    region_name="auto",
+    endpoint_url=settings.AWS_S3_ENDPOINT_URL,
+    aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+    aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+)
+
+class UploadHLSZipAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
-    def get(self, request, video_id):
-        video = get_object_or_404(Video, id=video_id)
+    def post(self, request):
+        zip_file = request.FILES.get("zip")
+        title = request.data.get("title")
+        description = request.data.get("description")
+        course_id = request.data.get("course")
 
-        return Response({
-            "status": video.status,        # ✅ REQUIRED
-            "stage": video.stage,          # uploading / converting / uploading_hls
-            "progress": video.progress,    # 0–100
-            "log": (video.log or "")[-2000:],  # last logs only
-        })
+        logger.info("📦 Upload request received")
+
+        if not zip_file or not zip_file.name.endswith(".zip"):
+            logger.warning("❌ Invalid or missing ZIP file")
+            return Response({"error": "ZIP file required"}, status=400)
+
+        temp_dir = tempfile.mkdtemp()
+        logger.info(f"📁 Temp directory created: {temp_dir}")
+
+        try:
+            # 1️⃣ Extract ZIP
+            logger.info("📂 Extracting ZIP...")
+            with zipfile.ZipFile(zip_file) as z:
+                z.extractall(temp_dir)
+            logger.info("✅ ZIP extracted successfully")
+
+            # 2️⃣ Find module folder
+            extracted_items = os.listdir(temp_dir)
+            logger.info(f"📦 Extracted items: {extracted_items}")
+
+            if len(extracted_items) != 1:
+                logger.error("❌ ZIP must contain exactly one module folder")
+                return Response(
+                    {"error": "ZIP must contain exactly ONE module folder"},
+                    status=400
+                )
+
+            module_name = extracted_items[0]
+            module_path = os.path.join(temp_dir, module_name)
+
+            if not os.path.isdir(module_path):
+                logger.error("❌ Module path is not a directory")
+                return Response({"error": "Invalid module structure"}, status=400)
+
+            logger.info(f"📁 Module detected: {module_name}")
+
+            # 3️⃣ Validate master.m3u8
+            master_path = os.path.join(module_path, "master.m3u8")
+            if not os.path.exists(master_path):
+                logger.error("❌ master.m3u8 not found")
+                return Response({"error": "master.m3u8 not found"}, status=400)
+
+            logger.info("🎬 master.m3u8 found")
+
+            # 4️⃣ Create DB record
+            video = Video.objects.create(
+                title=title,
+                description=description,
+                course_id=course_id,
+                status="processing",
+            )
+
+            logger.info(f"📝 Video DB record created (id={video.id})")
+
+            lesson_id = f"lesson_{video.id}"
+
+            # 5️⃣ Upload to Cloudflare R2
+            r2_base = f"videos/course-{course_id}/{lesson_id}/{module_name}"
+            logger.info(f"☁️ Uploading files to R2 path: {r2_base}")
+
+            upload_folder_recursive_to_r2(
+                local_folder=module_path,
+                r2_prefix=r2_base,
+            )
+
+            logger.info("✅ Upload to Cloudflare R2 completed")
+
+            # 6️⃣ Save final URL
+            playlist_url = (
+                os.getenv("R2_PUBLIC_URL").rstrip("/") +
+                f"/{r2_base}/master.m3u8"
+            )
+
+            video.video_url = playlist_url
+            video.status = "ready"
+            video.save(update_fields=["video_url", "status"])
+
+            logger.info(f"🎉 Video ready | URL saved: {playlist_url}")
+
+            return Response({
+                "status": "ready",
+                "playlist_url": playlist_url
+            })
+
+        except Exception as e:
+            logger.exception("🔥 Upload failed due to error")
+            return Response({"error": "Upload failed"}, status=500)
+
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            logger.info("🧹 Temp directory cleaned")
