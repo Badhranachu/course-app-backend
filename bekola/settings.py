@@ -256,14 +256,28 @@ CELERY_TASK_TIME_LIMIT = 60 * 60 * 6      # 6 hours
 CELERY_TASK_SOFT_TIME_LIMIT = 60 * 60 * 5 # 5 hours
 
 
+import os
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
+
+    "formatters": {
+        "simple": {
+            "format": "[{levelname}] {message}",
+            "style": "{",
+        },
+    },
+
     "handlers": {
         "console": {
             "class": "logging.StreamHandler",
+            "formatter": "simple",
         },
     },
+
     "root": {
         "handlers": ["console"],
         "level": "INFO",
