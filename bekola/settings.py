@@ -9,8 +9,8 @@ import os
 import pymysql
 pymysql.install_as_MySQLdb()
 
-DATA_UPLOAD_MAX_MEMORY_SIZE = 2147483648
-FILE_UPLOAD_MAX_MEMORY_SIZE = 2147483648
+DATA_UPLOAD_MAX_MEMORY_SIZE = None
+FILE_UPLOAD_MAX_MEMORY_SIZE = None
 
 FILE_UPLOAD_HANDLERS = [
     "django.core.files.uploadhandler.TemporaryFileUploadHandler",
@@ -249,3 +249,8 @@ CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_BACKEND = "django-db"
 CELERY_TIMEZONE = "Asia/Kolkata"
+
+
+# Celery hard timeout increased 50%+
+CELERY_TASK_TIME_LIMIT = 60 * 60 * 6      # 6 hours
+CELERY_TASK_SOFT_TIME_LIMIT = 60 * 60 * 5 # 5 hours

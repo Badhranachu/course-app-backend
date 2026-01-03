@@ -1894,16 +1894,7 @@ class VideoUploadAPIView(APIView):
             status=status.HTTP_201_CREATED
         )
 
-class VideoStatusAPIView(APIView):
-    permission_classes = [IsAuthenticated, IsAdminUserRole]
 
-    def get(self, request, video_id):
-        video = get_object_or_404(Video, id=video_id)
-
-        return Response({
-            "status": video.status,
-            "video_url": video.video_url,
-        })
 
 
 
@@ -1983,4 +1974,26 @@ class AdminVideoCreateView(APIView):
         return Response({
             "video_id": video.id,
             "status": "queued"
+        })
+
+
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from django.shortcuts import get_object_or_404
+from api.models import Video
+
+
+class VideoStatusAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, video_id):
+        video = get_object_or_404(Video, id=video_id)
+
+        return Response({
+            "status": video.status,        # ✅ REQUIRED
+            "stage": video.stage,          # uploading / converting / uploading_hls
+            "progress": video.progress,    # 0–100
+            "log": (video.log or "")[-2000:],  # last logs only
         })

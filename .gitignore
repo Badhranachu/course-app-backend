@@ -18,3 +18,9 @@ __pycache__/
 media/
 staticfiles/
 celerybeat-schedule
+
+
+.env
+__pycache__/
+media/
+*.log

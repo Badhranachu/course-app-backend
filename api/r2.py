@@ -79,13 +79,13 @@ import boto3
 import os
 import boto3
 
-def upload_hls_folder_to_r2(local_hls_dir, r2_folder):
+def upload_hls_folder_to_r2(local_hls_dir, r2_folder, video=None):
     """
     Uploads all HLS files (.m3u8, .ts) in a folder to Cloudflare R2
+    Optionally updates Video.progress during upload
     Returns public playlist.m3u8 URL
     """
 
-    # 🔹 ENV VARS (same pattern you already use)
     R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
     R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
     R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME")
@@ -101,32 +101,31 @@ def upload_hls_folder_to_r2(local_hls_dir, r2_folder):
     ]):
         raise ValueError("Missing Cloudflare R2 environment variables")
 
-    R2_ENDPOINT_URL = f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-
     s3 = boto3.client(
         "s3",
-        endpoint_url=R2_ENDPOINT_URL,
+        endpoint_url=f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com",
         aws_access_key_id=R2_ACCESS_KEY_ID,
         aws_secret_access_key=R2_SECRET_ACCESS_KEY,
         region_name="auto",
     )
 
+    files = [
+        f for f in os.listdir(local_hls_dir)
+        if f.endswith(".ts") or f.endswith(".m3u8")
+    ]
+
+    total_files = len(files)
+    uploaded = 0
     playlist_key = None
 
-    for filename in os.listdir(local_hls_dir):
+    for filename in files:
         file_path = os.path.join(local_hls_dir, filename)
 
-        if not os.path.isfile(file_path):
-            continue
-
-        # 🔹 Correct content-type
         if filename.endswith(".m3u8"):
             content_type = "application/x-mpegURL"
             playlist_key = f"{r2_folder}/{filename}"
-        elif filename.endswith(".ts"):
-            content_type = "video/MP2T"
         else:
-            continue
+            content_type = "video/MP2T"
 
         s3.upload_file(
             file_path,
@@ -134,6 +133,14 @@ def upload_hls_folder_to_r2(local_hls_dir, r2_folder):
             f"{r2_folder}/{filename}",
             ExtraArgs={"ContentType": content_type},
         )
+
+        uploaded += 1
+
+        # 🔹 Update progress (HLS upload stage)
+        if video:
+            percent = int((uploaded / total_files) * 100)
+            video.progress = percent
+            video.save(update_fields=["progress"])
 
     if not playlist_key:
         raise RuntimeError("playlist.m3u8 not found during upload")

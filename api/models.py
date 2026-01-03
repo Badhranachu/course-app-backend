@@ -186,6 +186,13 @@ class Video(models.Model):
         choices=STATUS_CHOICES,
         default="uploaded",
     )
+    stage = models.CharField(
+        max_length=30,
+        default="waiting"
+    )
+    progress = models.IntegerField(default=0)
+
+    log = models.TextField(blank=True, default="")
 
 
 
