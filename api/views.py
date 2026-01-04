@@ -2019,21 +2019,7 @@ from api.r2 import upload_folder_recursive_to_r2
 
 # -------------------------
 # LOGGER
-# -------------------------
-logger = logging.getLogger(__name__)
 
-TMP_DIR = "/tmp/hls"  # change to C:/temp/hls on Windows if needed
-
-# -------------------------
-# CLOUDFLARE R2 CLIENT
-# -------------------------
-s3 = boto3.client(
-    "s3",
-    region_name="auto",
-    endpoint_url=settings.AWS_S3_ENDPOINT_URL,
-    aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-    aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-)
 
 import os
 import zipfile
@@ -2074,8 +2060,9 @@ class AdminVideoUploadZipAPIView(APIView):
         video = Video.objects.create(
             course=course,
             title=title,
-            playlist_url=""
+            status="uploading"
         )
+
 
         lesson_key = f"lesson_{video.id}"
 
@@ -2084,11 +2071,16 @@ class AdminVideoUploadZipAPIView(APIView):
         # --------------------------------------------------
         s3 = boto3.client(
             "s3",
-            endpoint_url=settings.R2_ENDPOINT,
-            aws_access_key_id=settings.R2_ACCESS_KEY,
-            aws_secret_access_key=settings.R2_SECRET_KEY,
-            region_name="auto",
+            endpoint_url=settings.AWS_S3_ENDPOINT_URL,
+            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+            region_name=settings.AWS_S3_REGION_NAME,
+            config=boto3.session.Config(
+                signature_version=settings.AWS_S3_SIGNATURE_VERSION
+            ),
         )
+
+
 
         zip_r2_key = f"videos/course-{course.id}/{lesson_key}/original.zip"
 
@@ -2096,10 +2088,11 @@ class AdminVideoUploadZipAPIView(APIView):
 
         s3.upload_fileobj(
             zip_file,
-            settings.R2_BUCKET,
+            settings.AWS_STORAGE_BUCKET_NAME,  # ✅ FIX
             zip_r2_key,
             ExtraArgs={"ContentType": "application/zip"},
         )
+
 
         # --------------------------------------------------
         # 3️⃣ Download ZIP to TEMP
@@ -2109,7 +2102,12 @@ class AdminVideoUploadZipAPIView(APIView):
 
         logger.info("⬇️ Downloading ZIP from R2")
 
-        s3.download_file(settings.R2_BUCKET, zip_r2_key, zip_path)
+        s3.download_file(
+            settings.AWS_STORAGE_BUCKET_NAME,  # ✅ FIX
+            zip_r2_key,
+            zip_path
+        )
+
 
         # --------------------------------------------------
         # 4️⃣ Extract ZIP
@@ -2143,7 +2141,8 @@ class AdminVideoUploadZipAPIView(APIView):
         for root, dirs, files in os.walk(hls_root):
             for file in files:
                 local_path = os.path.join(root, file)
-                relative_path = os.path.relpath(local_path, hls_root)
+                relative_path = os.path.relpath(local_path, hls_root).replace("\\", "/")
+
 
                 r2_key = f"{base_r2_path}/{relative_path}"
 
@@ -2157,10 +2156,11 @@ class AdminVideoUploadZipAPIView(APIView):
 
                 s3.upload_file(
                     local_path,
-                    settings.R2_BUCKET,
+                    settings.AWS_STORAGE_BUCKET_NAME,  # ✅ FIX
                     r2_key,
                     ExtraArgs={"ContentType": content_type},
                 )
+
 
         # --------------------------------------------------
         # 7️⃣ Cleanup TEMP
@@ -2176,8 +2176,10 @@ class AdminVideoUploadZipAPIView(APIView):
             f"videos/course-{course.id}/{lesson_key}/hls/master.m3u8"
         )
 
-        video.playlist_url = playlist_url
+        video.video_url = playlist_url
+        video.status = "ready"
         video.save()
+
 
         logger.info("🎉 Video ready | URL saved: %s", playlist_url)
 
