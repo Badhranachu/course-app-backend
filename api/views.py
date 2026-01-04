@@ -1184,18 +1184,33 @@ import shutil
 from moviepy.editor import VideoFileClip
 
 
+
+class UpdateVideoDurationAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, course_id, video_id):
+        duration = int(request.data.get("duration", 0))
+
+        if duration <= 0:
+            return Response({"error": "Invalid duration"}, status=400)
+
+        video = get_object_or_404(Video, id=video_id, course_id=course_id)
+
+        # Save only once
+        if not video.duration or video.duration == 0:
+            video.duration = duration
+            video.save(update_fields=["duration"])
+
+        return Response({"duration": video.duration})
+
+
 def ensure_video_duration(video):
     """
     Return video duration safely.
-    Duration must already be saved during upload/HLS processing.
+    Duration is saved from frontend once.
     """
+    return video.duration or 0
 
-    if video.duration and video.duration > 0:
-        return video.duration
-
-  
-
-    return 0
 
     
 MAX_FORWARD_SKIP = 1800  # ✅ 30 minutes (in seconds)

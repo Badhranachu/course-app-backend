@@ -351,3 +351,7 @@ collection = db["documents"]
 def get_context_from_db(query: str) -> str:
     docs = collection.find().limit(5)
     return "\n".join(doc["content"] for doc in docs)
+
+
+
+

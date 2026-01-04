@@ -347,6 +347,8 @@ class StudentTest(models.Model):
     test = models.ForeignKey(Test, on_delete=models.CASCADE)
     score = models.IntegerField(default=0)
     total_marks = models.IntegerField(default=0)
+    passed = models.BooleanField(default=False)
+
     submitted_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

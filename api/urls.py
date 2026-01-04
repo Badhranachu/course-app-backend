@@ -44,7 +44,11 @@ urlpatterns = [
 #     views.StreamVideoAPIView.as_view(),
 #     name="video-stream",
 # ),
-
+    path(
+    "courses/<int:course_id>/videos/<int:video_id>/duration/",
+    views.UpdateVideoDurationAPIView.as_view(),
+    name="video-duration"
+),
 
     #update video progress and get video progress
 path(
@@ -92,6 +96,7 @@ path(
     views.SubmitTestAPIView.as_view(),
     name="test-submit"
     ),
+    
 
     # 4️⃣ Test history (summary list for course)
 path(
