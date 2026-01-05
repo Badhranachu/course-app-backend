@@ -579,3 +579,36 @@ class SupportTicket(models.Model):
 
     def __str__(self):
         return f"{self.subject} ({self.status})"
+    
+
+
+
+from django.db import models
+
+from django.db import models
+
+class Contactus(models.Model):
+    STATUS_CHOICES = (
+        ("not", "Not Contacted"),
+        ("pending", "Pending"),
+        ("contacted", "Contacted"),
+    )
+
+    full_name = models.CharField(max_length=150)
+    email = models.EmailField(unique=True)
+    subject = models.CharField(max_length=200)
+    message = models.TextField()
+
+    status = models.CharField(
+        max_length=10,
+        choices=STATUS_CHOICES,
+        default="not"   # ✅ default
+    )
+
+    contacted_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.full_name} - {self.email}"
+
+

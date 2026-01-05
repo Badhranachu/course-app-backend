@@ -1,23 +1,18 @@
 from django.contrib import admin
 from django.apps import apps
 from django import forms
-import tempfile
-import shutil
-import os
-
+from django.utils import timezone
 
 from .models import (
     Course,
     CourseModuleItem,
     SupportTicket,
     Video,
+    Contactus,
 )
 
-# from api.r2 import upload_video_to_r2
-
-
 # =====================================================
-# VIDEO ADMIN FORM (Cloudflare R2 + Folder Attachment)
+# VIDEO ADMIN FORM
 # =====================================================
 class VideoAdminForm(forms.ModelForm):
     class Meta:
@@ -30,14 +25,9 @@ class VideoAdminForm(forms.ModelForm):
         )
 
 
-    
-
-    
-
 # =====================================================
 # VIDEO ADMIN
 # =====================================================
-
 @admin.register(Video)
 class VideoAdmin(admin.ModelAdmin):
     form = VideoAdminForm
@@ -57,6 +47,8 @@ class VideoAdmin(admin.ModelAdmin):
     readonly_fields = (
         "duration",
         "created_at",
+        "video_url",
+
     )
 
     fields = (
@@ -69,33 +61,10 @@ class VideoAdmin(admin.ModelAdmin):
         "created_at",
     )
 
-   
 
 # =====================================================
-# AUTO-REGISTER ALL OTHER MODELS
+# COURSE MODULE ITEM ADMIN
 # =====================================================
-
-app = apps.get_app_config("api")
-
-EXCLUDE_MODELS = {
-    Video,
-    CourseModuleItem,
-    SupportTicket,
-}
-
-for model in app.get_models():
-    if model in EXCLUDE_MODELS:
-        continue
-    try:
-        admin.site.register(model)
-    except admin.sites.AlreadyRegistered:
-        pass
-
-
-# =====================================================
-# COURSE MODULE ITEM ADMIN (CUSTOM)
-# =====================================================
-
 class CourseModuleItemAdminForm(forms.ModelForm):
     class Meta:
         model = CourseModuleItem
@@ -141,7 +110,6 @@ class CourseModuleItemAdmin(admin.ModelAdmin):
 # =====================================================
 # SUPPORT TICKET ADMIN
 # =====================================================
-
 @admin.register(SupportTicket)
 class SupportTicketAdmin(admin.ModelAdmin):
     list_display = (
@@ -155,3 +123,66 @@ class SupportTicketAdmin(admin.ModelAdmin):
     search_fields = ("subject", "message", "user__email")
     ordering = ("-created_at",)
     readonly_fields = ("user", "created_at", "updated_at")
+
+
+# =====================================================
+# CONTACT US ADMIN (CUSTOM)
+# =====================================================
+@admin.register(Contactus)
+class ContactusAdmin(admin.ModelAdmin):
+    list_display = (
+        "full_name",
+        "email",
+        "subject",
+        "status",
+        "created_at",
+    )
+
+    list_filter = ("status", "created_at")
+    search_fields = ("full_name", "email", "subject")
+    ordering = ("-created_at",)
+
+    readonly_fields = (
+        "full_name",
+        "email",
+        "subject",
+        "message",
+        "created_at",
+        "contacted_at",
+    )
+
+    fields = (
+        "full_name",
+        "email",
+        "subject",
+        "message",
+        "status",        # dropdown
+        "contacted_at",
+        "created_at",
+    )
+
+    def save_model(self, request, obj, form, change):
+        if obj.status == "contacted" and obj.contacted_at is None:
+            obj.contacted_at = timezone.now()
+        super().save_model(request, obj, form, change)
+
+
+# =====================================================
+# AUTO-REGISTER ALL OTHER MODELS
+# =====================================================
+app = apps.get_app_config("api")
+
+EXCLUDE_MODELS = {
+    Video,
+    CourseModuleItem,
+    SupportTicket,
+    Contactus,   # ✅ IMPORTANT FIX
+}
+
+for model in app.get_models():
+    if model in EXCLUDE_MODELS:
+        continue
+    try:
+        admin.site.register(model)
+    except admin.sites.AlreadyRegistered:
+        pass

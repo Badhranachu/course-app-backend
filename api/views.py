@@ -2205,3 +2205,64 @@ class AdminVideoUploadZipAPIView(APIView):
             },
             status=200,
         )
+
+
+from api.serializers import ContactUsSerializer
+from .models import Contactus
+class ContactUsCreateAPIView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        email = request.data.get("email")
+
+        # 1️⃣ Prevent duplicate email submissions
+        if Contactus.objects.filter(email=email).exists():
+            return Response(
+                {
+                    "message": (
+                        "We already received your message. "
+                        "Our team will contact you shortly."
+                    )
+                },
+                status=status.HTTP_200_OK
+            )
+
+        serializer = ContactUsSerializer(data=request.data)
+
+        if serializer.is_valid():
+            contact = serializer.save()
+
+            # 2️⃣ Send email ONLY for new contact
+            admin_emails = list(
+                CustomUser.objects.filter(
+                    role="admin",
+                    is_active=True
+                ).values_list("email", flat=True)
+            )
+
+            if admin_emails:
+                send_mail(
+                    subject="New Contact Us Message",
+                    message=f"""
+New Contact Us Submission
+
+Name: {contact.full_name}
+Email: {contact.email}
+Subject: {contact.subject}
+
+Message:
+{contact.message}
+
+Submitted At: {contact.created_at}
+""",
+                    from_email=settings.DEFAULT_FROM_EMAIL,
+                    recipient_list=admin_emails,
+                    fail_silently=True,
+                )
+
+            return Response(
+                {"message": "Message sent successfully"},
+                status=status.HTTP_201_CREATED
+            )
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

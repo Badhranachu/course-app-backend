@@ -74,7 +74,24 @@ class VideoSerializer(serializers.ModelSerializer):
 
         return data
 
-    
+
+from rest_framework import serializers
+from .models import Contactus
+
+class ContactUsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Contactus
+        fields = [
+            "id",
+            "full_name",
+            "email",
+            "subject",
+            "message",
+            "status",
+            "created_at",
+        ]
+        read_only_fields = ["status", "created_at"]
+
 
     
 
