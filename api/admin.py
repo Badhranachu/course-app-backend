@@ -47,7 +47,7 @@ class VideoAdmin(admin.ModelAdmin):
     readonly_fields = (
         "duration",
         "created_at",
-        "video_url",
+        # "video_url",
 
     )
 
