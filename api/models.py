@@ -611,4 +611,14 @@ class Contactus(models.Model):
     def __str__(self):
         return f"{self.full_name} - {self.email}"
 
+from datetime import timedelta
+class PasswordResetOTP(models.Model):
+    email = models.EmailField()
+    otp = models.CharField(max_length=6)
+    created_at = models.DateTimeField(auto_now_add=True)
 
+    def is_expired(self):
+        return timezone.now() > self.created_at + timedelta(minutes=5)
+
+    def __str__(self):
+        return f"{self.email} - {self.otp}"

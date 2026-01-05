@@ -124,11 +124,14 @@ def generate_certificate(*, user, course):
     header_y = height - 210
     c.setFont("TimesNewRoman", 13)
 
-    c.drawString(left_margin, header_y, f"Date: {today}")
+    # LEFT → Reference Number
+    c.drawString(left_margin, header_y, f"Ref: {ref_no}")
+
+    # RIGHT → Date
     c.drawRightString(
         left_margin + content_width,
         header_y,
-        f"Ref: {ref_no}"
+        f"Date: {today}"
     )
 
     # ===============================
@@ -149,7 +152,7 @@ def generate_certificate(*, user, course):
     para1 = (
         f"This is to certify that "
         f"<b>{title}{name}</b> has successfully completed "
-        f"his internship program in <b>{course.title}</b> from "
+        f"his internship program as a <b>{course.title}</b> from "
         f"<b>{start_date.strftime('%d %B %Y')}</b> to "
         f"<b>{end_date.strftime('%d %B %Y')}</b> at Nexston."
     )

@@ -93,6 +93,15 @@ class ContactUsSerializer(serializers.ModelSerializer):
         read_only_fields = ["status", "created_at"]
 
 
+
+class SendOTPSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+class VerifyOTPResetPasswordSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    otp = serializers.CharField(max_length=6)
+    password = serializers.CharField(min_length=6)
+    confirm_password = serializers.CharField(min_length=6)
     
 
 
