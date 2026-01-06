@@ -96,6 +96,13 @@ path(
     views.SubmitTestAPIView.as_view(),
     name="test-submit"
     ),
+
+    path(
+    "courses/<int:course_id>/tests/<int:test_id>/status/",
+    views.TestStatusAPIView.as_view(),
+    name="test-status"
+),
+
     
 
     # 4️⃣ Test history (summary list for course)
@@ -131,6 +138,13 @@ path(
     "courses/<int:course_id>/videos/<int:video_id>/attachment-content/<path:file_path>/",
     views.AttachmentContentAPIView.as_view(),
     name="attachment-content"
+),
+
+
+path(
+    "courses/<int:course_id>/videos/<int:video_id>/attachment-download/",
+    views.AttachmentDownloadAPIView.as_view(),
+    name="attachment-download"
 ),
     # =========================
     # CERTIFICATES

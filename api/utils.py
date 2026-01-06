@@ -55,11 +55,12 @@ def generate_certificate(*, user, course):
     # ===============================
     try:
         profile = user.student_profile
-        name = profile.full_name.strip().title()
+        name = profile.full_name.strip()
         title = "Mr. " if profile.gender == "male" else "Ms. "
     except:
         name = user.email.split("@")[0].title()
         title = "Mr. "
+
 
     # ===============================
     # ENROLLMENT DATES

@@ -523,20 +523,20 @@ class SubmitTestAPIView(APIView):
         # ----------------------------------
         # 3️⃣ Block ONLY if already PASSED
         # ----------------------------------
-        previous_attempts = StudentTest.objects.filter(
+        already_passed = StudentTest.objects.filter(
             user=request.user,
-            test=test
-        )
+            test=test,
+            passed=True
+        ).exists()
 
-        for attempt in previous_attempts:
-            if attempt.total_marks > 0 and attempt.score >= (attempt.total_marks / 2):
-                return Response(
-                    {"error": "You have already passed this test"},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+        if already_passed:
+            return Response(
+                {"error": "You have already passed this test"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         # ----------------------------------
-        # 4️⃣ Create new attempt
+        # 4️⃣ Create new attempt (ALWAYS)
         # ----------------------------------
         student_test = StudentTest.objects.create(
             user=request.user,
@@ -574,26 +574,26 @@ class SubmitTestAPIView(APIView):
             )
 
         # ----------------------------------
-        # 6️⃣ Save result
+        # 6️⃣ Pass logic (>= 50%)
         # ----------------------------------
+        passed = total > 0 and score >= (total * 0.5)
+
         student_test.score = score
         student_test.total_marks = total
+        student_test.passed = passed
         student_test.save()
 
-        passed = total > 0 and score >= (total / 2)
-
         # ======================================================
-        # 7️⃣ IF PASSED → COMPLETE THIS MODULE & UNLOCK NEXT
+        # 7️⃣ IF PASSED → COMPLETE MODULE & UNLOCK NEXT
         # ======================================================
         if passed:
             current_module = CourseModuleItem.objects.filter(
                 course_id=course_id,
                 item_type="test",
-                test_id=test.id   # ✅ FIX HERE
+                test=test
             ).first()
 
             if current_module:
-                # mark completed
                 StudentContentProgress.objects.update_or_create(
                     user=request.user,
                     module=current_module,
@@ -603,7 +603,6 @@ class SubmitTestAPIView(APIView):
                     }
                 )
 
-                # unlock next module by order
                 next_module = CourseModuleItem.objects.filter(
                     course_id=course_id,
                     order__gt=current_module.order
@@ -625,6 +624,7 @@ class SubmitTestAPIView(APIView):
             "total": total,
             "passed": passed
         })
+
     
 # ============================================================
 # COURSE TEST HISTORY
@@ -709,6 +709,59 @@ class TestHistoryAPIView(APIView):
                 }
                 for a in answers
             ]
+        })
+
+
+from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from django.shortcuts import get_object_or_404
+
+class TestStatusAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, course_id, test_id):
+
+        test = get_object_or_404(
+            Test,
+            id=test_id,
+            course_id=course_id
+        )
+
+        attempts = StudentTest.objects.filter(
+            user=request.user,
+            test=test
+        ).order_by("-submitted_at")
+
+        if not attempts.exists():
+            return Response({
+                "attempted": False,
+                "passed": False,
+                "score": None,
+                "total": None,
+                "attempts_count": 0
+            })
+
+        passed_attempt = attempts.filter(passed=True).first()
+
+        if passed_attempt:
+            return Response({
+                "attempted": True,
+                "passed": True,
+                "score": passed_attempt.score,
+                "total": passed_attempt.total_marks,
+                "attempts_count": attempts.count()
+            })
+
+        # attempted but NOT passed
+        latest = attempts.first()
+
+        return Response({
+            "attempted": True,
+            "passed": False,
+            "score": latest.score,
+            "total": latest.total_marks,
+            "attempts_count": attempts.count()
         })
 
 # ------------------------------------------------------------
@@ -811,6 +864,32 @@ class AttachmentContentAPIView(APIView):
             content = "Unable to read file"
 
         return Response({"content": content})
+
+
+from django.http import HttpResponse
+from django.shortcuts import get_object_or_404
+from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated,AllowAny
+from io import BytesIO
+import os
+
+class AttachmentDownloadAPIView(APIView):
+    permission_classes = [AllowAny]  # ✅ PUBLIC
+
+    def get(self, request, course_id, video_id):
+        video = get_object_or_404(Video, id=video_id, course_id=course_id)
+
+        if not video.folder_attachment:
+            return HttpResponse("No attachment", status=404)
+
+        with video.folder_attachment.open("rb") as f:
+            zip_bytes = f.read()
+
+        filename = os.path.basename(video.folder_attachment.name)
+
+        response = HttpResponse(zip_bytes, content_type="application/zip")
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
 
 class CourseVideosAPIView(APIView):
     permission_classes = [permissions.IsAuthenticated]
