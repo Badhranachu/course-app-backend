@@ -140,16 +140,22 @@ class CourseSerializer(serializers.ModelSerializer):
 class CourseListSerializer(serializers.ModelSerializer):
     is_active = serializers.BooleanField()
     is_enrolled = serializers.SerializerMethodField()
+    image = serializers.SerializerMethodField()
+
 
     class Meta:
         model = Course
-        fields = ["id", "title", "description", "price", "is_active", "is_enrolled"]
+        fields = ["id", "title", "description", "image","price", "is_active", "is_enrolled"]
 
     def get_is_enrolled(self, obj):
         user = self.context.get("request").user
         if user.is_authenticated:
             return Enrollment.objects.filter(user=user, course=obj).exists()
         return False
+    def get_image(self, obj):
+        if obj.image:
+            return f"https://cdn.nexston.in/{obj.image.name}"
+        return None
 
 
 

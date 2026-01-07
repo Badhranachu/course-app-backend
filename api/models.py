@@ -148,6 +148,11 @@ class Course(models.Model):
     title = models.CharField(max_length=200)
     description = models.TextField()
     price = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)])
+    image = models.ImageField(
+        upload_to="courses/images/",
+        blank=True,
+        null=True
+    )
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -207,60 +212,36 @@ class Video(models.Model):
 # api/models.py
 
 class Enrollment(models.Model):
-    STATUS_CHOICES = [
-        ('pending', 'Pending'),
-        ('completed', 'Completed'),
-    ]
-
-    PAYMENT_METHOD_CHOICES = [
-        ('upi', 'UPI'),
-        ('card', 'Card'),
-        ('netbanking', 'Net Banking'),
-        ('wallet', 'Wallet'),
-        ('unknown', 'Unknown'),
-    ]
-
-    user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name='enrollments'
-    )
-    course = models.ForeignKey(
-        Course,
-        on_delete=models.CASCADE,
-        related_name='enrollments'
-    )
-
-    status = models.CharField(
-        max_length=20,
-        choices=STATUS_CHOICES,
-        default='pending'
-    )
-
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    course = models.ForeignKey(Course, on_delete=models.CASCADE)
     enrolled_at = models.DateTimeField(auto_now_add=True)
 
-    # ✅ NEW FIELDS
-    payment_date = models.DateTimeField(null=True, blank=True)
-    payment_method = models.CharField(
-        max_length=20,
-        choices=PAYMENT_METHOD_CHOICES,
-        default='unknown'
-    )
-
-    razorpay_order_id = models.CharField(max_length=255, blank=True)
-    razorpay_payment_id = models.CharField(max_length=255, blank=True)
-
     class Meta:
-        unique_together = ['user', 'course']
-
-    def __str__(self):
-        try:
-            name = self.user.student_profile.full_name
-        except Exception:
-            name = self.user.email
-        return f"{name} → {self.course.title} ({self.status})"
+        unique_together = ["user", "course"]
 
 
+
+class PaymentTransaction(models.Model):
+    STATUS_CHOICES = [
+        ("created", "Created"),
+        ("captured", "Captured"),
+        ("failed", "Failed"),
+        ("cancelled", "Cancelled"),
+    ]
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    course = models.ForeignKey(Course, on_delete=models.CASCADE)
+
+    razorpay_order_id = models.CharField(max_length=255)
+    razorpay_payment_id = models.CharField(max_length=255, blank=True, null=True)
+
+    amount = models.IntegerField()  # in paise
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES)
+
+    payment_method = models.CharField(max_length=50, blank=True)
+    raw_response = models.JSONField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
 
 # =====================================================
 # TESTS

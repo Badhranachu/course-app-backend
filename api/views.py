@@ -257,6 +257,9 @@ class CourseDetailAPIView(APIView):
         )
 
 def get_user_unlock_status(user, course):
+    if not Enrollment.objects.filter(user=user, course=course).exists():
+        return []
+    
     modules = CourseModuleItem.objects.filter(course=course).order_by("order")
     unlocked_modules = []
 
@@ -305,13 +308,13 @@ class CourseModulesAPIView(APIView):
         # ✅ Correct enrollment check
         if not Enrollment.objects.filter(
             user=user,
-            course=course,
-            status__in=["pending", "completed"]
+            course=course
         ).exists():
             return Response(
                 {"error": "You are not enrolled in this course"},
                 status=403
             )
+
 
         modules = CourseModuleItem.objects.filter(
             course=course
@@ -342,6 +345,7 @@ class CourseModulesAPIView(APIView):
 # ------------------------------------------------------------
 # PAYMENT
 # ------------------------------------------------------------
+from api.models import PaymentTransaction
 
 class CreatePaymentOrderAPIView(APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -349,62 +353,108 @@ class CreatePaymentOrderAPIView(APIView):
     def post(self, request):
         course = get_object_or_404(Course, id=request.data.get("course_id"))
 
-        if Enrollment.objects.filter(user=request.user, course=course).exists():
-            return Response({"error": "Already enrolled"}, status=400)
+        # ❌ Already paid → block
+        if Enrollment.objects.filter(
+            user=request.user,
+            course=course
+        ).exists():
+            return Response(
+                {"error": "Already enrolled"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         order = razorpay_client.order.create({
-            "amount": int(float(course.price) * 100),
+            "amount": int(course.price * 100),  # ✅ paise
             "currency": "INR",
-            "receipt": f"user_{request.user.id}_course_{course.id}"
+            "payment_capture": 1,
         })
+
+        # ✅ Store billing attempt ONLY
+        PaymentTransaction.objects.create(
+            user=request.user,
+            course=course,
+            razorpay_order_id=order["id"],
+            amount=order["amount"],
+            status="created"
+        )
 
         return Response({
             "order_id": order["id"],
             "amount": order["amount"],
-            "currency": order["currency"],
+            "currency": "INR",
             "key_id": settings.RAZORPAY_KEY_ID
         })
-
 
 class VerifyPaymentAPIView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
-        params = {
-            "razorpay_order_id": request.data.get("razorpay_order_id"),
-            "razorpay_payment_id": request.data.get("razorpay_payment_id"),
-            "razorpay_signature": request.data.get("razorpay_signature"),
-        }
+        course = get_object_or_404(Course, id=request.data.get("course_id"))
 
-        # ✅ Verify signature
-        razorpay_client.utility.verify_payment_signature(params)
+        order_id = request.data.get("razorpay_order_id")
+        payment_id = request.data.get("razorpay_payment_id")
+        signature = request.data.get("razorpay_signature")
 
-        # ✅ Fetch payment details (to get method)
-        payment = razorpay_client.payment.fetch(
-            params["razorpay_payment_id"]
-        )
+        if not all([order_id, payment_id, signature]):
+            return Response(
+                {"error": "Missing payment parameters"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
-        payment_method = payment.get("method", "unknown")
+        # 1️⃣ Verify signature
+        try:
+            razorpay_client.utility.verify_payment_signature({
+                "razorpay_order_id": order_id,
+                "razorpay_payment_id": payment_id,
+                "razorpay_signature": signature,
+            })
+        except razorpay.errors.SignatureVerificationError:
+            PaymentTransaction.objects.filter(
+                razorpay_order_id=order_id
+            ).update(status="failed")
 
-        course = get_object_or_404(
-            Course,
-            id=request.data.get("course_id")
-        )
+            return Response(
+                {"error": "Invalid signature"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
-        Enrollment.objects.create(
+        # 2️⃣ Fetch payment
+        payment = razorpay_client.payment.fetch(payment_id)
+
+        if payment["status"] != "captured":
+            PaymentTransaction.objects.filter(
+                razorpay_order_id=order_id
+            ).update(
+                status="failed",
+                raw_response=payment
+            )
+
+            return Response(
+                {"error": "Payment not successful"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 3️⃣ Update transaction
+        txn = get_object_or_404(
+            PaymentTransaction,
             user=request.user,
             course=course,
-            status="completed",
-            razorpay_order_id=params["razorpay_order_id"],
-            razorpay_payment_id=params["razorpay_payment_id"],
-            payment_method=payment_method,
-            payment_date=timezone.now(),  # ✅ stored here
+            razorpay_order_id=order_id
         )
 
-        return Response({
-            "message": "Enrollment successful",
-            "payment_method": payment_method
-        })
+        txn.status = "captured"
+        txn.razorpay_payment_id = payment_id
+        txn.payment_method = payment.get("method", "unknown")
+        txn.raw_response = payment
+        txn.save()
+
+        # 4️⃣ CREATE ENROLLMENT (ONLY HERE)
+        Enrollment.objects.get_or_create(
+            user=request.user,
+            course=course
+        )
+
+        return Response({"message": "Enrollment successful"})
 
 # ============================================================
 # VIDEO STREAM
@@ -448,7 +498,6 @@ class CourseTestsAPIView(APIView):
         if not Enrollment.objects.filter(
             user=request.user,
             course_id=course_id,
-            status="completed"
         ).exists():
             return Response(
                 {"error": "You are not enrolled in this course"},
@@ -513,7 +562,6 @@ class SubmitTestAPIView(APIView):
         if not Enrollment.objects.filter(
             user=request.user,
             course_id=course_id,
-            status="completed"
         ).exists():
             return Response(
                 {"error": "You are not enrolled in this course"},
@@ -640,7 +688,6 @@ class TestHistoryAPIView(APIView):
         if not Enrollment.objects.filter(
             user=request.user,
             course_id=course_id,
-            status="completed"
         ).exists():
             return Response(
                 {"error": "You are not enrolled in this course"},
@@ -782,7 +829,6 @@ class AttachmentPreviewAPIView(APIView):
         if not Enrollment.objects.filter(
             user=request.user,
             course_id=course_id,
-            status__in=["active", "completed"]
         ).exists():
             return Response(
                 {"error": "You are not enrolled in this course"},
@@ -811,7 +857,6 @@ class AttachmentTreeAPIView(APIView):
         if not Enrollment.objects.filter(
             user=request.user,
             course_id=course_id,
-            status="completed"
         ).exists():
             return Response({"error": "You are not enrolled"}, status=403)
 
@@ -846,7 +891,6 @@ class AttachmentContentAPIView(APIView):
         if not Enrollment.objects.filter(
             user=request.user,
             course_id=course_id,
-            status="completed"
         ).exists():
             return Response({"error": "You are not enrolled"}, status=403)
 
@@ -1048,7 +1092,6 @@ class SaveGithubLinkAPIView(APIView):
             enrollment = Enrollment.objects.get(
                 user=request.user,
                 course=course,
-                status="completed"
             )
         except Enrollment.DoesNotExist:
             return Response({"error": "Not enrolled"}, status=403)
@@ -1354,7 +1397,6 @@ class UpdateVideoProgressAPIView(APIView):
         if not Enrollment.objects.filter(
             user=user,
             course=course,
-            status__in=["pending", "completed"]
         ).exists():
             return Response({"error": "Not enrolled"}, status=403)
 
@@ -1451,7 +1493,6 @@ class CourseModuleProgressAPIView(APIView):
         if not Enrollment.objects.filter(
             user=user,
             course=course,
-            status="completed"
         ).exists():
             return Response(
                 {"error": "You are not enrolled in this course"},
@@ -1735,21 +1776,35 @@ class StudentProfileAPIView(APIView):
 
 from api.serializers import StudentEnrollmentSerializer
 class StudentEnrollmentListAPIView(APIView):
-    permission_classes = [IsAuthenticated, IsStudent]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         """
-        Get all enrollments for logged-in student
+        Billing history for logged-in student
         """
-        enrollments = Enrollment.objects.filter(
-            user=request.user
-        ).select_related("course").order_by("-enrolled_at")
+        txns = (
+            PaymentTransaction.objects
+            .filter(user=request.user)
+            .select_related("course")
+            .order_by("-created_at")
+        )
 
-        serializer = StudentEnrollmentSerializer(enrollments, many=True)
-        return Response(serializer.data)
-    
+        data = []
+        for t in txns:
+            data.append({
+                "course_title": t.course.title,
+                "status": t.status,                 # created / captured / failed / cancelled
+                "payment_date": (
+                    t.created_at.strftime("%d %b %Y")
+                    if t.status == "captured"
+                    else None
+                ),
+                "payment_method": t.payment_method or "—",
+                "amount": t.amount / 100,           # rupees
+                "order_id": t.razorpay_order_id,
+            })
 
-
+        return Response(data)
 
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
@@ -1902,7 +1957,6 @@ class CourseVideoAllProgressAPIView(APIView):
         if not Enrollment.objects.filter(
             user=request.user,
             course_id=course_id,
-            status="completed"
         ).exists():
             return Response({"error": "Not enrolled"}, status=403)
 
