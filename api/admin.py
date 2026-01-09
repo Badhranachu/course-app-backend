@@ -45,7 +45,7 @@ class VideoAdmin(admin.ModelAdmin):
     list_filter = ("course",)
 
     readonly_fields = (
-        "duration",
+        # "duration",
         "created_at",
         # "video_url",
 

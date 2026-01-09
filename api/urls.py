@@ -39,14 +39,17 @@ urlpatterns = [
     # =========================
     # VIDEO
     # =========================
-# path(
-#     "courses/<int:course_id>/videos/<int:video_id>/stream/",
-#     views.StreamVideoAPIView.as_view(),
-#     name="video-stream",
-# ),
+
     path(
     "courses/<int:course_id>/videos/<int:video_id>/duration/",
     views.UpdateVideoDurationAPIView.as_view(),
+    name="video-duration"
+),
+
+
+path(
+    "courses/<int:course_id>/videos/<int:video_id>/duration/",
+    views.SaveVideoDurationAPIView.as_view(),
     name="video-duration"
 ),
 

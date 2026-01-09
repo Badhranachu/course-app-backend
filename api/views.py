@@ -1334,7 +1334,61 @@ def ensure_video_duration(video):
     return video.duration or 0
 
 
-    
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from django.shortcuts import get_object_or_404
+from api.models import Video
+
+class SaveVideoDurationAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, course_id, video_id):
+        # ✅ Ensure course exists
+        course = get_object_or_404(Course, id=course_id)
+
+        # ✅ Ensure video belongs to the course
+        video = get_object_or_404(Video, id=video_id, course=course)
+
+        # ✅ Save duration only once
+        if video.duration:
+            return Response(
+                {
+                    "video_id": video.id,
+                    "duration": video.duration,
+                    "message": "Duration already saved"
+                },
+                status=200
+            )
+
+        duration = request.data.get("duration")
+
+        try:
+            duration = int(duration)
+        except (TypeError, ValueError):
+            return Response(
+                {"error": "Invalid duration"},
+                status=400
+            )
+
+        if duration <= 0:
+            return Response(
+                {"error": "Duration must be greater than 0"},
+                status=400
+            )
+
+        video.duration = duration
+        video.save(update_fields=["duration"])
+
+        return Response(
+            {
+                "course_id": course.id,
+                "video_id": video.id,
+                "duration": video.duration
+            },
+            status=201
+        )
+
 MAX_FORWARD_SKIP = 1800  # ✅ 30 minutes (in seconds)
 
 class UpdateVideoProgressAPIView(APIView):
