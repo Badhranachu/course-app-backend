@@ -183,14 +183,16 @@ from rest_framework.permissions import IsAuthenticated, IsAdminUser
 
 class CourseListCreateAPIView(APIView):
     """
-    GET  → List all courses (authenticated users)
-    POST → Create course (admin only)
+    GET    → Public (anyone)
+    POST   → Admin only
+    PATCH  → Admin only
+    DELETE → Admin only
     """
 
     def get_permissions(self):
-        if self.request.method == "POST":
+        if self.request.method in ["POST", "PUT", "PATCH", "DELETE"]:
             return [permissions.IsAdminUser()]
-        return [permissions.IsAuthenticated()]
+        return [permissions.AllowAny()]  # GET is public
 
     def get(self, request):
         courses = Course.objects.all()
@@ -211,7 +213,6 @@ class CourseListCreateAPIView(APIView):
             return Response(serializer.data, status=status.HTTP_201_CREATED)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
 
 from api.authentication import UserTokenAuthentication
 
@@ -352,31 +353,26 @@ class CreatePaymentOrderAPIView(APIView):
 
     def post(self, request):
         course = get_object_or_404(Course, id=request.data.get("course_id"))
+        coordinator_id = request.data.get("coordinator_id")
 
-        # ❌ Already paid → block
-        if Enrollment.objects.filter(
-            user=request.user,
-            course=course
-        ).exists():
-            return Response(
-                {"error": "Already enrolled"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        if Enrollment.objects.filter(user=request.user, course=course).exists():
+            return Response({"error": "Already enrolled"}, status=400)
 
         order = razorpay_client.order.create({
-            "amount": int(course.price * 100),  # ✅ paise
+            "amount": int(course.price * 100),
             "currency": "INR",
             "payment_capture": 1,
         })
 
-        # ✅ Store billing attempt ONLY
         PaymentTransaction.objects.create(
             user=request.user,
             course=course,
             razorpay_order_id=order["id"],
             amount=order["amount"],
-            status="created"
+            status="created",
+            coordinator_id=coordinator_id
         )
+
 
         return Response({
             "order_id": order["id"],
@@ -385,56 +381,27 @@ class CreatePaymentOrderAPIView(APIView):
             "key_id": settings.RAZORPAY_KEY_ID
         })
 
+from api.models import CoordinatorStudent
+
 class VerifyPaymentAPIView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
         course = get_object_or_404(Course, id=request.data.get("course_id"))
-
         order_id = request.data.get("razorpay_order_id")
         payment_id = request.data.get("razorpay_payment_id")
         signature = request.data.get("razorpay_signature")
 
-        if not all([order_id, payment_id, signature]):
-            return Response(
-                {"error": "Missing payment parameters"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        razorpay_client.utility.verify_payment_signature({
+            "razorpay_order_id": order_id,
+            "razorpay_payment_id": payment_id,
+            "razorpay_signature": signature,
+        })
 
-        # 1️⃣ Verify signature
-        try:
-            razorpay_client.utility.verify_payment_signature({
-                "razorpay_order_id": order_id,
-                "razorpay_payment_id": payment_id,
-                "razorpay_signature": signature,
-            })
-        except razorpay.errors.SignatureVerificationError:
-            PaymentTransaction.objects.filter(
-                razorpay_order_id=order_id
-            ).update(status="failed")
-
-            return Response(
-                {"error": "Invalid signature"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # 2️⃣ Fetch payment
         payment = razorpay_client.payment.fetch(payment_id)
-
         if payment["status"] != "captured":
-            PaymentTransaction.objects.filter(
-                razorpay_order_id=order_id
-            ).update(
-                status="failed",
-                raw_response=payment
-            )
+            return Response({"error": "Payment not successful"}, status=400)
 
-            return Response(
-                {"error": "Payment not successful"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # 3️⃣ Update transaction
         txn = get_object_or_404(
             PaymentTransaction,
             user=request.user,
@@ -448,13 +415,32 @@ class VerifyPaymentAPIView(APIView):
         txn.raw_response = payment
         txn.save()
 
-        # 4️⃣ CREATE ENROLLMENT (ONLY HERE)
-        Enrollment.objects.get_or_create(
-            user=request.user,
-            course=course
-        )
+        Enrollment.objects.get_or_create(user=request.user, course=course)
 
-        return Response({"message": "Enrollment successful"})
+        student = request.user.student_profile
+        coordinator = txn.coordinator  # selected during payment popup
+
+        if coordinator:
+            # 1️⃣ Create CoordinatorStudent
+            CoordinatorStudent.objects.get_or_create(
+                coordinator=coordinator,
+                student=student,
+                course=course,
+                email=request.user.email
+            )
+
+            # 2️⃣ Auto create CoordinatorContact if not exists
+            CoordinatorContact.objects.get_or_create(
+                coordinator=coordinator,
+                email=request.user.email,
+                defaults={
+                    "name": student.full_name,
+                    "phone": student.phone
+                }
+            )
+
+        return Response({"message": "Enrollment + Coordinator linked + Contact synced"})
+
 
 # ============================================================
 # VIDEO STREAM
@@ -2618,3 +2604,192 @@ class VerifyForgotPasswordOTPAPIView(APIView):
             status=status.HTTP_200_OK
         )
 
+
+
+#coordinator
+from api.models import Job
+from api.serializers import JobListSerializer,JobDetailSerializer
+class JobListAPI(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        jobs = Job.objects.filter(status="open")
+        serializer = JobListSerializer(jobs, many=True)
+        return Response(serializer.data)
+
+
+class JobDetailAPI(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request, pk):
+        job = Job.objects.get(pk=pk)
+        serializer = JobDetailSerializer(job)
+        return Response(serializer.data)
+    
+
+
+
+from api.models import CoordinatorProfile,PendingCoordinator
+class CoordinatorSignupAPI(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        data = request.data
+
+        if CustomUser.objects.filter(email=data["email"]).exists():
+            return Response({"error": "Email already exists"}, status=400)
+
+        user = CustomUser.objects.create_user(
+            email=data["email"],
+            password=data["password"],
+            role="coordinator",
+            is_active=False
+        )
+
+        PendingCoordinator.objects.create(
+            user=user,
+            full_name=data["full_name"],
+            email=data["email"],
+            phone=data["phone"],
+            address=data["address"],
+            college_name=data["college_name"],
+            photo=data["photo"]
+        )
+
+        return Response({
+            "message": "Registration submitted. Waiting for admin approval."
+        }, status=201)
+
+
+from django.contrib.auth import get_user_model
+from django.contrib.auth.hashers import check_password
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import AllowAny
+from .models import PendingCoordinator, CoordinatorProfile,CoordinatorContact
+
+User = get_user_model()
+class CoordinatorLoginAPI(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        email = request.data.get("email")
+        phone = request.data.get("phone")
+        password = request.data.get("password")
+
+        if not email or not password or not phone:
+            return Response(
+                {"error": "Email, phone and password required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        email = email.strip().lower()
+
+        try:
+            user = CustomUser.objects.get(email=email)
+        except CustomUser.DoesNotExist:
+            return Response({"error": "Invalid credentials"}, status=401)
+
+        # Check password manually (works even if inactive)
+        if not user.check_password(password):
+            return Response({"error": "Invalid credentials"}, status=401)
+
+        # 1) Pending approval check (before active check)
+        if PendingCoordinator.objects.filter(user=user, phone=phone).exists():
+            return Response(
+                {"error": "Your registration is submitted. Please wait for admin approval."},
+                status=403
+            )
+
+        # 2) Approved coordinator check
+        if not CoordinatorProfile.objects.filter(user=user, phone=phone).exists():
+            return Response({"error": "Invalid credentials"}, status=401)
+
+        # 3) Generate token
+        token, _ = UserToken.objects.get_or_create(user=user)
+        token.mark_used()
+
+        return Response({
+            "token": token.token,
+            "user": {
+                "id": user.id,
+                "email": user.email,
+                "role": user.role,
+                "name": user.coordinator_profile.full_name,
+                "coordinator_id": user.coordinator_profile.coordinator_id
+            }
+        })
+
+
+
+
+from api.serializers import CoordinatorProfileSerializer
+class CoordinatorProfileAPI(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        profile = CoordinatorProfile.objects.get(user=request.user)
+        serializer = CoordinatorProfileSerializer(profile)
+        return Response(serializer.data)
+
+
+class CoordinatorContactCreateAPI(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        profile = CoordinatorProfile.objects.get(user=request.user)
+
+        try:
+            CoordinatorContact.objects.create(
+                coordinator=profile,
+                name=request.data["name"],
+                email=request.data["email"],
+                phone=request.data["phone"],
+            )
+            return Response({"message": "Contact added successfully"})
+
+        except IntegrityError as e:
+            if "email" in str(e):
+                return Response({"error": "This email already exists."}, status=400)
+            if "phone" in str(e):
+                return Response({"error": "This phone number already exists."}, status=400)
+            return Response({"error": "Duplicate entry."}, status=400)
+        
+
+    
+
+from api.serializers import CoordinatorContactSerializer
+class CoordinatorContactListAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        coordinator = request.user.coordinator_profile
+        contacts = CoordinatorContact.objects.filter(coordinator=coordinator)
+
+        data = []
+        for c in contacts:
+            is_student = StudentProfile.objects.filter(user__email=c.email).exists()
+
+            is_enrolled = CoordinatorStudent.objects.filter(
+                coordinator=coordinator,
+                email=c.email
+            ).exists()
+
+            data.append({
+                "name": c.name,
+                "email": c.email,
+                "phone": c.phone,
+                "is_student": is_student,
+                "is_enrolled": is_enrolled
+            })
+
+        return Response(data)
+    
+
+
+class CoordinatorListAPIView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        qs = CoordinatorProfile.objects.all().values("id", "coordinator_id", "full_name")
+        return Response(qs)

@@ -370,3 +370,69 @@ class StudentEnrollmentSerializer(serializers.ModelSerializer):
             
         )
         read_only_fields = fields
+
+#coordinator
+from api.models import Job
+
+from rest_framework import serializers
+from .models import Job
+
+class JobListSerializer(serializers.ModelSerializer):
+    image = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Job
+        fields = ["id", "name", "duration", "image", "slots", "status"]
+
+    def get_image(self, obj):
+        if obj.image:
+            return f"https://cdn.nexston.in/{obj.image.name}"
+        return None
+
+
+class JobDetailSerializer(serializers.ModelSerializer):
+    image = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Job
+        fields = "__all__"
+
+    def get_image(self, obj):
+        if obj.image:
+            return f"https://cdn.nexston.in/{obj.image.name}"
+        return None
+
+
+
+from api.models import CoordinatorProfile
+class CoordinatorProfileSerializer(serializers.ModelSerializer):
+    photo = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CoordinatorProfile
+        fields = [
+            "id",
+            "coordinator_id",
+            "full_name",
+            "email",
+            "phone",
+            "address",
+            "college_name",
+            "photo",
+            "created_at",
+        ]
+
+    def get_photo(self, obj):
+        if obj.photo:
+            return f"https://cdn.nexston.in/{obj.photo.name}"
+        return None
+    
+
+# serializers.py
+from rest_framework import serializers
+from .models import CoordinatorContact
+
+class CoordinatorContactSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CoordinatorContact
+        fields = ["id", "name", "email", "phone", "created_at"]

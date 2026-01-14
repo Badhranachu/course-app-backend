@@ -36,7 +36,7 @@ DEBUG = os.getenv("DEBUG", "False").lower() == "true"
 ALLOWED_HOSTS = [
     "nexston.in",
     "www.nexston.in",
-    "103.194.228.82",
+    "72.62.197.39",
     "localhost",
     "127.0.0.1",
 ]

@@ -85,10 +85,10 @@ class CustomUserManager(BaseUserManager):
 # =====================================================
 
 class CustomUser(AbstractBaseUser, PermissionsMixin):
-    ROLE_CHOICES = (('admin', 'Admin'), ('student', 'Student'))
+    ROLE_CHOICES = (('admin', 'Admin'), ('student', 'Student'),('coordinator', 'Coordinator'))
 
     email = models.EmailField(unique=True)
-    role = models.CharField(max_length=10, choices=ROLE_CHOICES)
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES)
 
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
@@ -138,6 +138,76 @@ class StudentProfile(models.Model):
 
     def __str__(self):
         return f"StudentProfile → {self.full_name}"
+    
+
+class PendingCoordinator(models.Model):
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    full_name = models.CharField(max_length=100)
+    email = models.EmailField()
+    phone = models.CharField(max_length=15)
+    address = models.TextField()
+    college_name = models.CharField(max_length=150)
+    photo = models.ImageField(upload_to="coordinators/passport_photos/")
+    approved = models.BooleanField(default=False)  # ✔ Admin ticks this
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def save(self, *args, **kwargs):
+        # If admin approves
+        if self.pk and self.approved:
+            from .models import CoordinatorProfile
+
+            # Activate user
+            self.user.is_active = True
+            self.user.save()
+
+            # Create Coordinator Profile (ID auto generated here)
+            CoordinatorProfile.objects.create(
+                user=self.user,
+                full_name=self.full_name,
+                email=self.email,
+                phone=self.phone,
+                address=self.address,
+                college_name=self.college_name,
+                photo=self.photo
+            )
+
+            # Delete pending record
+            super().delete()
+            return
+
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"Pending → {self.full_name}"
+
+
+
+
+
+class CoordinatorProfile(models.Model):
+    coordinator_id = models.CharField(max_length=20, unique=True, editable=False)
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="coordinator_profile"
+    )
+    full_name = models.CharField(max_length=100)
+    email = models.EmailField()
+    phone = models.CharField(max_length=15)
+    address = models.TextField()
+    college_name = models.CharField(max_length=150)
+    photo = models.ImageField(upload_to="coordinators/passport_photos/")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def save(self, *args, **kwargs):
+        if not self.coordinator_id:
+            last = CoordinatorProfile.objects.order_by("-id").first()
+            num = int(last.coordinator_id.replace("CORD", "")) + 1 if last else 101
+            self.coordinator_id = f"CORD{num}"
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.coordinator_id} → {self.full_name}"
 
 
 # =====================================================
@@ -164,7 +234,6 @@ class Course(models.Model):
 # =====================================================
 # VIDEO
 # =====================================================
-from moviepy.editor import VideoFileClip
 import tempfile
 import shutil
 import os
@@ -240,6 +309,11 @@ class PaymentTransaction(models.Model):
 
     payment_method = models.CharField(max_length=50, blank=True)
     raw_response = models.JSONField(null=True, blank=True)
+    coordinator = models.ForeignKey(
+        CoordinatorProfile,
+        null=True, blank=True,
+        on_delete=models.SET_NULL
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -603,3 +677,62 @@ class PasswordResetOTP(models.Model):
 
     def __str__(self):
         return f"{self.email} - {self.otp}"
+    
+
+
+class Job(models.Model):
+    STATUS_CHOICES = (
+        ("open", "Open"),
+        ("closed", "Closed"),
+        ("paused", "Paused"),
+    )
+
+    name = models.CharField(max_length=200)
+    duration = models.CharField(max_length=100)   # e.g. "3 Months"
+    image = models.ImageField(upload_to="jobs/")
+    description = models.TextField()
+    slots = models.PositiveIntegerField()         # number of slots available
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="open")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.name
+    
+
+class CoordinatorContact(models.Model):
+    coordinator = models.ForeignKey(
+        CoordinatorProfile,
+        on_delete=models.CASCADE,
+        related_name="contacts"
+    )
+    name = models.CharField(max_length=100)
+    email = models.EmailField(unique=True)
+    phone = models.CharField(max_length=15, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.name} ({self.phone})"
+
+
+
+class CoordinatorStudent(models.Model):
+    coordinator = models.ForeignKey(
+        CoordinatorProfile,
+        on_delete=models.CASCADE,
+        related_name="assigned_students"
+    )
+    student = models.ForeignKey(
+        StudentProfile,
+        on_delete=models.CASCADE,
+        related_name="assigned_coordinators"
+    )
+    course = models.ForeignKey(
+        Course,
+        on_delete=models.CASCADE,
+        related_name="coordinator_students"
+    )
+    email = models.EmailField()  # optional if you want quick access
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.coordinator.full_name} → {self.student.full_name} ({self.course.title})"
