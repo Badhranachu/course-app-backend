@@ -2503,49 +2503,61 @@ from django.core.mail import EmailMessage, get_connection
 class ResendForgotPasswordOTPAPIView(APIView):
     permission_classes = [AllowAny]
 
-    # -----------------------------
-    # Generate 6-digit OTP
-    # -----------------------------
     def generate_otp(self):
         return str(random.randint(100000, 999999))
 
-    # -----------------------------
-    # Send OTP Email (SAFE)
-    # -----------------------------
     def send_otp_email(self, email, otp):
         send_mail(
-            subject="Reset Password OTP",
-            message=f"Your OTP is {otp}. Valid for 5 minutes.",
-            from_email=settings.EMAIL_HOST_USER,
-            recipient_list=[email],
+            "Reset Password OTP",
+            f"Your OTP is {otp}. Valid for 5 minutes.",
+            settings.EMAIL_HOST_USER,
+            [email],
             fail_silently=False,
         )
 
-    # -----------------------------
-    # POST → Resend OTP
-    # -----------------------------
     def post(self, request):
         serializer = SendOTPSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-
         email = serializer.validated_data["email"]
 
-        # Check email exists
         if not User.objects.filter(email=email).exists():
             return Response(
                 {"message": "Email not registered"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # 🔥 Delete any existing OTP
-        PasswordResetOTP.objects.filter(email=email).delete()
+        otp_obj = PasswordResetOTP.objects.filter(email=email).first()
 
-        # Create new OTP
-        otp = self.generate_otp()
-        PasswordResetOTP.objects.create(email=email, otp=otp)
+        if not otp_obj:
+            return Response(
+                {"message": "OTP not requested yet"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
-        # Send mail
-        self.send_otp_email(email, otp)
+        # ⛔ If OTP expired → reset flow
+        if otp_obj.is_expired():
+            otp_obj.delete()
+            return Response(
+                {"message": "OTP expired. Please request again"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # ⛔ Allow ONLY ONE resend within 5 minutes
+        if otp_obj.resend_count >= 1:
+            remaining = 5 - int(
+                (timezone.now() - otp_obj.created_at).total_seconds() // 60
+            )
+            return Response(
+                {"message": f"Please wait {remaining} minute(s) before resending OTP"},
+                status=status.HTTP_429_TOO_MANY_REQUESTS
+            )
+
+        # ✅ First resend allowed
+        otp_obj.otp = self.generate_otp()
+        otp_obj.resend_count += 1
+        otp_obj.save()
+
+        self.send_otp_email(email, otp_obj.otp)
 
         return Response(
             {"message": "OTP resent successfully"},
