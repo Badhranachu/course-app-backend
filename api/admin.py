@@ -167,16 +167,68 @@ class ContactusAdmin(admin.ModelAdmin):
         super().save_model(request, obj, form, change)
 
 
+
+
+from django.utils import timezone
+from api.models import CoordinatorPayout,CoordinatorStudent
+
+class CoordinatorStudentInline(admin.TabularInline):
+    model = CoordinatorStudent
+    extra = 0
+    readonly_fields = (
+        "student",
+        "course",
+        "email",
+        "is_paid",
+        "created_at",
+    )
+    can_delete = False
+
+
+@admin.register(CoordinatorPayout)
+class CoordinatorPayoutAdmin(admin.ModelAdmin):
+
+    list_display = (
+        "coordinator",
+        "total_students",
+        "total_amount",
+        "status",
+        "requested_at",
+        "processed_at",
+    )
+
+    list_filter = ("status", "requested_at")
+
+    inlines = [CoordinatorStudentInline]
+
+    def save_model(self, request, obj, form, change):
+
+        if change:
+            previous = CoordinatorPayout.objects.get(pk=obj.pk)
+
+            # Approve payout
+            if previous.status == "pending" and obj.status == "approved":
+                obj.processed_at = timezone.now()
+                obj.students.update(is_paid=True)
+
+            # Reject payout
+            if previous.status == "pending" and obj.status == "rejected":
+                obj.students.update(payout_reference=None)
+
+        super().save_model(request, obj, form, change)
+
+from api.models import CoordinatorPayout
 # =====================================================
 # AUTO-REGISTER ALL OTHER MODELS
 # =====================================================
 app = apps.get_app_config("api")
-
 EXCLUDE_MODELS = {
     Video,
     CourseModuleItem,
     SupportTicket,
     Contactus,   # ✅ IMPORTANT FIX
+    CoordinatorPayout
+    
 }
 
 for model in app.get_models():

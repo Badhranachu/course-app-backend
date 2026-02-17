@@ -168,12 +168,22 @@ class VerifyEmailOTPAPIView(APIView):
 
         except EmailOTP.DoesNotExist:
             return Response({"error": "OTP not found"}, status=404)
-    
-class GetUserAPIView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+
+from rest_framework.permissions import IsAuthenticated
+
+class CurrentUserAPIView(APIView):
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        return Response(UserSerializer(request.user).data)
+        user = request.user
+
+        return Response({
+            "id": user.id,
+            "email": user.email,
+            "role": user.role,
+        })
+
+
 
 # ------------------------------------------------------------
 # COURSE CRUD
@@ -2721,14 +2731,16 @@ class CoordinatorLoginAPI(APIView):
         token, _ = UserToken.objects.get_or_create(user=user)
         token.mark_used()
 
+        profile = CoordinatorProfile.objects.get(user=user, phone=phone)
+
         return Response({
             "token": token.token,
             "user": {
                 "id": user.id,
                 "email": user.email,
                 "role": user.role,
-                "name": user.coordinator_profile.full_name,
-                "coordinator_id": user.coordinator_profile.coordinator_id
+                "name": profile.full_name,
+                "coordinator_id": profile.coordinator_id
             }
         })
 
@@ -2776,26 +2788,119 @@ class CoordinatorContactListAPIView(APIView):
 
     def get(self, request):
         coordinator = request.user.coordinator_profile
-        contacts = CoordinatorContact.objects.filter(coordinator=coordinator)
 
         data = []
-        for c in contacts:
-            is_student = StudentProfile.objects.filter(user__email=c.email).exists()
 
-            is_enrolled = CoordinatorStudent.objects.filter(
-                coordinator=coordinator,
-                email=c.email
-            ).exists()
+        # ==============================
+        # 1️⃣ MANUAL CONTACTS (LEADS)
+        # ==============================
+        contacts = CoordinatorContact.objects.filter(coordinator=coordinator)
+
+        processed_emails = set()
+
+        for c in contacts:
+            student = StudentProfile.objects.filter(user__email=c.email).first()
+
+            courses = []
+            selected_this = False
+            selected_other = False
+            is_paid = False
+            payout_status = None
+
+            if student:
+
+                all_links = CoordinatorStudent.objects.filter(student=student)
+
+                if all_links.exists():
+
+                    this_links = all_links.filter(coordinator=coordinator)
+
+                    if this_links.exists():
+                        selected_this = True
+
+                        # Take first link (since unique_together ensures uniqueness per course)
+                        link = this_links.first()
+
+                        is_paid = link.is_paid
+                        payout_status = (
+                            link.payout_reference.status
+                            if link.payout_reference else None
+                        )
+
+                        for link in this_links:
+                            payment = PaymentTransaction.objects.filter(
+                                user=student.user,
+                                course=link.course,
+                                status="captured"
+                            ).first()
+
+                            if payment:
+                                courses.append({
+                                    "course_title": link.course.title,
+                                    "amount_paid": payment.amount / 100
+                                })
+
+                    else:
+                        selected_other = True
 
             data.append({
                 "name": c.name,
                 "email": c.email,
                 "phone": c.phone,
-                "is_student": is_student,
-                "is_enrolled": is_enrolled
+                "is_student": bool(student),
+                "selected_this_coordinator": selected_this,
+                "selected_other_coordinator": selected_other,
+                "courses": courses,
+                "is_paid": is_paid,
+                "payout_status": payout_status,
+            })
+
+            processed_emails.add(c.email)
+
+        # ========================================
+        # 2️⃣ AUTO-ASSIGNED STUDENTS (NOT LEADS)
+        # ========================================
+        assigned_students = CoordinatorStudent.objects.filter(
+            coordinator=coordinator
+        ).select_related("student", "course", "payout_reference")
+
+        for link in assigned_students:
+            student = link.student
+            email = student.user.email
+
+            if email in processed_emails:
+                continue
+
+            payment = PaymentTransaction.objects.filter(
+                user=student.user,
+                course=link.course,
+                status="captured"
+            ).first()
+
+            courses = []
+            if payment:
+                courses.append({
+                    "course_title": link.course.title,
+                    "amount_paid": payment.amount / 100
+                })
+
+            data.append({
+                "name": student.full_name,
+                "email": email,
+                "phone": student.phone,
+                "is_student": True,
+                "selected_this_coordinator": True,
+                "selected_other_coordinator": False,
+                "courses": courses,
+                "is_paid": link.is_paid,
+                "payout_status": (
+                    link.payout_reference.status
+                    if link.payout_reference else None
+                ),
             })
 
         return Response(data)
+
     
 
 
@@ -2805,3 +2910,225 @@ class CoordinatorListAPIView(APIView):
     def get(self, request):
         qs = CoordinatorProfile.objects.all().values("id", "coordinator_id", "full_name")
         return Response(qs)
+    
+
+
+
+
+
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from rest_framework import status
+from django.db import transaction
+
+from api.models import (
+    CoordinatorProfile,
+    CoordinatorStudent,
+)
+from django.db.models import F
+from api.models import CoordinatorPayout
+from django.db import models
+
+from django.db.models import Exists, OuterRef
+
+from api.models import Enrollment
+
+class RequestCoordinatorPayoutAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request):
+
+        user = request.user
+
+        # 1️⃣ Check role
+        if user.role != "coordinator":
+            return Response(
+                {"error": "Only coordinators can request payout."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        try:
+            coordinator = user.coordinator_profile
+        except:
+            return Response(
+                {"error": "Coordinator profile not found."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # 2️⃣ Prevent multiple pending payouts
+        if CoordinatorPayout.objects.filter(
+            coordinator=coordinator,
+            status="pending"
+        ).exists():
+            return Response(
+                {"error": "You already have a pending payout request."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 3️⃣ Only students with SUCCESSFUL PAYMENT
+        payment_subquery = PaymentTransaction.objects.filter(
+            user=OuterRef("student__user"),
+            course=OuterRef("course"),
+            status="captured"
+        )
+
+        eligible_students = CoordinatorStudent.objects.filter(
+            coordinator=coordinator,
+            is_paid=False,
+            payout_reference__isnull=True
+        ).annotate(
+            has_paid=Exists(payment_subquery)
+        ).filter(
+            has_paid=True
+        )
+
+        count = eligible_students.count()
+
+        if count == 0:
+            return Response(
+                {"error": "No eligible students available for payout."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 4️⃣ Slab Pricing
+        if count >= 15:
+            price = 300
+        elif count >= 10:
+            price = 250
+        else:
+            price = 200
+
+        total_amount = count * price
+
+        # 5️⃣ Create payout record
+        payout = CoordinatorPayout.objects.create(
+            coordinator=coordinator,
+            total_students=count,
+            price_per_student=price,
+            total_amount=total_amount,
+            status="pending"
+        )
+
+        # 6️⃣ Link students to payout (do NOT mark paid yet)
+        eligible_students.update(
+            payout_reference=payout
+        )
+
+        return Response(
+            {
+                "message": "Payout request submitted successfully.",
+                "total_students": count,
+                "price_per_student": price,
+                "total_amount": total_amount,
+                "status": payout.status
+            },
+            status=status.HTTP_201_CREATED
+        )
+    
+
+
+
+
+from django.db.models import Exists, OuterRef, Sum
+
+class CoordinatorPaymentDashboardAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+
+        user = request.user
+
+        # 1️⃣ Only coordinators
+        if user.role != "coordinator":
+            return Response(
+                {"error": "Only coordinators can access this."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        coordinator = user.coordinator_profile
+
+        # 2️⃣ Payment Subquery (Real Money Check)
+        payment_subquery = PaymentTransaction.objects.filter(
+            user=OuterRef("student__user"),
+            course=OuterRef("course"),
+            status="captured"
+        )
+
+        # 3️⃣ All Valid Paid Students
+        valid_students = CoordinatorStudent.objects.filter(
+            coordinator=coordinator
+        ).annotate(
+            has_paid=Exists(payment_subquery)
+        ).filter(
+            has_paid=True
+        )
+
+        total_valid_students = valid_students.count()
+
+        # 4️⃣ Students Already in Payout
+        requested_students = valid_students.filter(
+            payout_reference__status="pending"
+        )
+
+        approved_students = valid_students.filter(
+            payout_reference__status="approved"
+        )
+
+        allowed_students = valid_students.filter(
+            payout_reference__isnull=True
+        )
+
+        total_requested = requested_students.count()
+        total_approved = approved_students.count()
+        total_allowed = allowed_students.count()
+
+        # 5️⃣ Slab Price Calculation
+        if total_allowed >= 15:
+            slab_price = 300
+        elif total_allowed >= 10:
+            slab_price = 250
+        elif total_allowed >= 5:
+            slab_price = 200
+        else:
+            slab_price = 0
+
+        expected_amount = total_allowed * slab_price
+
+        # 6️⃣ Approved Amount (Collected)
+        approved_amount = CoordinatorPayout.objects.filter(
+            coordinator=coordinator,
+            status="approved"
+        ).aggregate(
+            total=Sum("total_amount")
+        )["total"] or 0
+
+        # 7️⃣ Pending Amount
+        pending_amount = CoordinatorPayout.objects.filter(
+            coordinator=coordinator,
+            status="pending"
+        ).aggregate(
+            total=Sum("total_amount")
+        )["total"] or 0
+
+        return Response({
+            "total_valid_paid_students": total_valid_students,
+
+            "students_requested_payout": total_requested,
+            "students_approved_payout": total_approved,
+            "students_allowed_for_request": total_allowed,
+
+            "slab_price_per_student": slab_price,
+            "expected_request_amount": expected_amount,
+
+            "approved_amount_collected": approved_amount,
+            "pending_amount": pending_amount,
+
+            "eligibility_status": (
+                "Eligible for payout request"
+                if slab_price > 0
+                else "Minimum 5 students required"
+            )
+        })

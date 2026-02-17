@@ -708,8 +708,8 @@ class CoordinatorContact(models.Model):
         related_name="contacts"
     )
     name = models.CharField(max_length=100)
-    email = models.EmailField(unique=True)
-    phone = models.CharField(max_length=15, unique=True)
+    email = models.EmailField()
+    phone = models.CharField(max_length=15)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -734,7 +734,62 @@ class CoordinatorStudent(models.Model):
         related_name="coordinator_students"
     )
     email = models.EmailField()  # optional if you want quick access
+    is_paid = models.BooleanField(default=False)
+
+    payout_reference = models.ForeignKey(
+        "CoordinatorPayout",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="students"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("coordinator", "student", "course")
 
     def __str__(self):
         return f"{self.coordinator.full_name} → {self.student.full_name} ({self.course.title})"
+
+
+class CoordinatorPayout(models.Model):
+
+    STATUS_CHOICES = (
+    ("pending", "Pending"),
+    ("approved", "Approved"),
+    ("rejected", "Rejected"),
+)
+
+
+    coordinator = models.ForeignKey(
+        CoordinatorProfile,
+        on_delete=models.CASCADE,
+        related_name="payouts"
+    )
+
+    total_students = models.PositiveIntegerField()
+
+    price_per_student = models.DecimalField(
+        max_digits=10,
+        decimal_places=2
+    )
+
+    total_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default="pending"
+    )
+
+    requested_at = models.DateTimeField(auto_now_add=True)
+    processed_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"{self.coordinator.full_name} → ₹{self.total_amount} ({self.status})"
+
+
+

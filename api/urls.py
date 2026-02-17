@@ -11,7 +11,7 @@ urlpatterns = [
     path("auth/signup/", views.SignupAPIView.as_view(), name="signup"),
     path("auth/login/", views.LoginAPIView.as_view(), name="login"),
     # path("auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
-    # path("auth/me/", views.GetUserAPIView.as_view(), name="get-user"),
+    path("auth/me/", views.CurrentUserAPIView.as_view(), name="get-user"),
 
     # =========================
     # COURSES
@@ -221,12 +221,15 @@ path(
 
 
     #coordinator
+    path("coordinators/list/", views.CoordinatorListAPIView.as_view()),
     path("coordinator/signup/", views.CoordinatorSignupAPI.as_view()),
     path("coordinator/login/", views.CoordinatorLoginAPI.as_view()),
     path("coordinator/profile/", views.CoordinatorProfileAPI.as_view(), name="coordinator-profile"),
     path("coordinator/contacts/add/", views.CoordinatorContactCreateAPI.as_view()),
     path("coordinator/contacts/", views.CoordinatorContactListAPIView.as_view(), name="coordinator-contacts"),
-    path("coordinators/list/", views.CoordinatorListAPIView.as_view()),
+    path("coordinator/request-payout/", views.RequestCoordinatorPayoutAPIView.as_view()),
+    path("coordinator/payout-dashboard/", views.CoordinatorPaymentDashboardAPIView.as_view()),
+
 
 
   
