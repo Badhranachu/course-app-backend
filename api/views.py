@@ -1084,13 +1084,15 @@ class SaveGithubLinkAPIView(APIView):
         course = get_object_or_404(Course, id=course_id)
 
         # must be completed enrollment
-        try:
-            enrollment = Enrollment.objects.get(
-                user=request.user,
-                course=course,
-            )
-        except Enrollment.DoesNotExist:
-            return Response({"error": "Not enrolled"}, status=403)
+        payment = PaymentTransaction.objects.filter(
+            user=precert.user,
+            course=precert.course,
+            status="captured"
+        ).first()
+
+        if not payment:
+            return  # Not eligible yet
+
 
         # prevent duplicate final certificate
         if Certificate.objects.filter(
