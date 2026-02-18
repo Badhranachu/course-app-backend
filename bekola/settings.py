@@ -39,6 +39,7 @@ ALLOWED_HOSTS = [
     "72.62.197.39",
     "localhost",
     "127.0.0.1",
+    "76.13.241.37"
 ]
 
 # -------------------------------------------------
@@ -286,3 +287,7 @@ LOGGING = {
         "level": "INFO",
     },
 }
+
+
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+SECURE_SSL_REDIRECT = False

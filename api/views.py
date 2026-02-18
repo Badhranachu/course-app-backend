@@ -1513,11 +1513,11 @@ class UpdateVideoProgressAPIView(APIView):
                         module=next_module,
                         defaults={"is_unlocked": True}
                     )
-                else:
-                    Enrollment.objects.filter(
-                        user=user,
-                        course=course
-                    ).update(status="completed")
+                # else:
+                #     Enrollment.objects.filter(
+                #         user=user,
+                #         course=course
+                #     ).update(status="completed")
 
         progress.save()
 
