@@ -234,7 +234,8 @@ from api.models import (
     PreCertificate,
     Certificate,
     Enrollment,
-    StudentProfile
+    StudentProfile,
+    PaymentTransaction
 )
 import logging
 
@@ -261,20 +262,20 @@ def delayed_transfer_and_email(precert_id):
     user = precert.user
     course = precert.course
 
-    # ---------- CHECK ENROLLMENT ----------
+    # ---------- CHECK PAYMENT ----------
     try:
-        enrollment = Enrollment.objects.get(
+        payment = PaymentTransaction.objects.get(
             user=user,
             course=course,
-            status="completed"
+            status="captured"
         )
-    except Enrollment.DoesNotExist:
-        return
+    except PaymentTransaction.DoesNotExist:
+        return  # not eligible (not paid)
 
-    if not enrollment.payment_date:
-        return
+    # ---------- ELIGIBILITY TIME ----------
+    payment_time = payment.created_at
+    eligible_at = payment_time + timedelta(minutes=5)  # change if needed
 
-    eligible_at = enrollment.payment_date + timedelta(minutes=0)
     if timezone.now() < eligible_at:
         return
 
@@ -308,7 +309,7 @@ def delayed_transfer_and_email(precert_id):
 
     except Exception:
         logger.exception("Email failed. Will retry.")
-        return  # ❌ do nothing if email fails
+        return
 
     # ---------- FINALIZE ----------
     try:
@@ -317,12 +318,12 @@ def delayed_transfer_and_email(precert_id):
             course=course,
             defaults={
                 "github_link": precert.github_link,
-                "certificate_file": file_field,  # ✅ FileField
+                "certificate_file": file_field,
                 "reference_number": ref_no,
             },
         )
 
-        # ---------- CLEANUP LOCAL FILE ONLY ----------
+        # Delete local temp file
         try:
             local_path = file_field.path
             if os.path.exists(local_path):
@@ -332,15 +333,12 @@ def delayed_transfer_and_email(precert_id):
                 f"Failed to delete local temp file: {file_field.name}"
             )
 
-        # ---------- DELETE PRECERT ----------
         precert.delete()
 
         logger.info(f"Certificate finalized successfully: {user.email}")
 
     except Exception:
         logger.exception("Finalization failed AFTER email")
-
-
     
 
 

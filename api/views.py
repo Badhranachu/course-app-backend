@@ -64,6 +64,8 @@ class SignupAPIView(APIView):
         )
 
 
+User = get_user_model()
+
 class LoginAPIView(APIView):
     permission_classes = [permissions.AllowAny]
 
@@ -77,9 +79,19 @@ class LoginAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # ✅ normalize email
+        # ✅ Normalize email
         email = email.strip().lower()
 
+        # 🔎 1️⃣ Check if account exists
+        user_exists = User.objects.filter(email=email).first()
+
+        if not user_exists:
+            return Response(
+                {"error": "Account not registered"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 🔐 2️⃣ Authenticate password
         user = authenticate(
             request=request,
             username=email,   # email is USERNAME_FIELD
@@ -92,16 +104,18 @@ class LoginAPIView(APIView):
                 status=status.HTTP_401_UNAUTHORIZED
             )
 
+        # 🚫 3️⃣ Check if disabled
         if not user.is_active:
             return Response(
                 {"error": "Account is disabled"},
                 status=status.HTTP_403_FORBIDDEN
             )
 
+        # 🔑 4️⃣ Generate / get token
         token, _ = UserToken.objects.get_or_create(user=user)
         token.mark_used()
 
-        # 🔹 Name handling (safe)
+        # 🔹 Safe name handling
         name = None
         if user.role == "student" and hasattr(user, "student_profile"):
             name = user.student_profile.full_name
@@ -112,11 +126,11 @@ class LoginAPIView(APIView):
             "token": token.token,
             "user": {
                 "id": user.id,
-                "email": user.email,  # already stored lowercase
+                "email": user.email,
                 "role": user.role,
                 "name": name,
             }
-        })
+        }, status=status.HTTP_200_OK)
 
 from api.models import EmailOTP
 import random
@@ -1083,20 +1097,23 @@ class SaveGithubLinkAPIView(APIView):
     def post(self, request, course_id):
         course = get_object_or_404(Course, id=course_id)
 
-        # must be completed enrollment
+        # ✅ Check payment properly
         payment = PaymentTransaction.objects.filter(
-            user=precert.user,
-            course=precert.course,
+            user=request.user,
+            course=course,
             status="captured"
         ).first()
 
         if not payment:
-            return  # Not eligible yet
+            return Response(
+                {"error": "Payment not completed"},
+                status=403
+            )
 
-
-        # prevent duplicate final certificate
+        # ✅ Prevent duplicate certificate
         if Certificate.objects.filter(
-            user=request.user, course=course
+            user=request.user,
+            course=course
         ).exists():
             return Response(
                 {"error": "Certificate already generated"},
@@ -1110,7 +1127,7 @@ class SaveGithubLinkAPIView(APIView):
                 status=400
             )
 
-        # generate certificate locally
+        # Generate certificate
         cert_path, ref_no = generate_certificate(
             user=request.user,
             course=course
@@ -1127,30 +1144,24 @@ class SaveGithubLinkAPIView(APIView):
                             "reference_number": ref_no,
                             "certificate_file": File(
                                 f,
-                                f"{os.path.basename(cert_path)}"
+                                os.path.basename(cert_path)
                             ),
                         },
                     )
         except Exception:
             logger.exception("PreCertificate creation failed")
-            return Response(
-                {"error": "Failed"},
-                status=500
-            )
+            return Response({"error": "Failed"}, status=500)
 
-        # 🔥 NEW LOGIC: IMMEDIATE ELIGIBILITY CHECK
         from api.utils import delayed_transfer_and_email
         delayed_transfer_and_email(precert.id)
 
         return Response(
             {
-                "message": (
-                    "Github link saved. "
-                    "If eligible, certificate has been emailed."
-                )
+                "message": "Github link saved. Certificate processing started."
             },
             status=200,
         )
+
     
 from django.db import IntegrityError
 from django.db import transaction
@@ -1587,6 +1598,7 @@ class CourseModuleProgressAPIView(APIView):
                 "module_id": module.id,
                 "order": module.order,
                 "item_type": module.item_type,
+                "description": module.description,
                 "is_unlocked": unlocked,
                 "is_completed": completed,
             }
@@ -2650,6 +2662,184 @@ class JobDetailAPI(APIView):
         serializer = JobDetailSerializer(job)
         return Response(serializer.data)
     
+
+User = get_user_model()
+
+class CoordinatorForgotPasswordAPIView(APIView):
+    permission_classes = []
+
+    def generate_otp(self):
+        return str(random.randint(100000, 999999))
+
+    def post(self, request):
+        serializer = SendOTPSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        email = serializer.validated_data["email"]
+
+        # ✅ Validate using CoordinatorProfile
+        profile = CoordinatorProfile.objects.filter(email=email).select_related("user").first()
+
+        if not profile:
+            return Response(
+                {"message": "Coordinator account not found"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        user = profile.user
+
+        existing_otp = PasswordResetOTP.objects.filter(email=email).first()
+
+        if existing_otp and not existing_otp.is_expired():
+            return Response(
+                {"message": "OTP already sent. Please check your email."},
+                status=status.HTTP_200_OK
+            )
+
+        if existing_otp:
+            existing_otp.delete()
+
+        otp = self.generate_otp()
+
+        PasswordResetOTP.objects.create(
+            email=email,
+            otp=otp
+        )
+
+        send_mail(
+            "Coordinator Reset Password OTP",
+            f"Your OTP is {otp}. Valid for 5 minutes.",
+            settings.EMAIL_HOST_USER,
+            [email],
+            fail_silently=False,
+        )
+
+        return Response(
+            {"message": "OTP sent successfully"},
+            status=status.HTTP_200_OK
+        )
+
+
+class CoordinatorResendForgotPasswordOTPAPIView(APIView):
+    permission_classes = []
+
+    def generate_otp(self):
+        return str(random.randint(100000, 999999))
+
+    def post(self, request):
+        serializer = SendOTPSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        email = serializer.validated_data["email"]
+
+        profile = CoordinatorProfile.objects.filter(email=email).select_related("user").first()
+
+        if not profile:
+            return Response(
+                {"message": "Coordinator account not found"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        otp_obj = PasswordResetOTP.objects.filter(email=email).first()
+
+        if not otp_obj:
+            return Response(
+                {"message": "OTP not requested yet"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if otp_obj.is_expired():
+            otp_obj.delete()
+            return Response(
+                {"message": "OTP expired. Please request again"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if otp_obj.resend_count >= 1:
+            return Response(
+                {"message": "Please wait before resending OTP"},
+                status=status.HTTP_429_TOO_MANY_REQUESTS
+            )
+
+        otp_obj.otp = self.generate_otp()
+        otp_obj.resend_count += 1
+        otp_obj.save()
+
+        send_mail(
+            "Coordinator Reset Password OTP",
+            f"Your OTP is {otp_obj.otp}. Valid for 5 minutes.",
+            settings.EMAIL_HOST_USER,
+            [email],
+            fail_silently=False,
+        )
+
+        return Response(
+            {"message": "OTP resent successfully"},
+            status=status.HTTP_200_OK
+        )
+
+
+
+
+class CoordinatorVerifyForgotPasswordOTPAPIView(APIView):
+    permission_classes = []
+
+    def post(self, request):
+        serializer = VerifyOTPResetPasswordSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        email = serializer.validated_data["email"]
+        otp = serializer.validated_data["otp"]
+        password = serializer.validated_data["password"]
+        confirm_password = serializer.validated_data["confirm_password"]
+
+        profile = CoordinatorProfile.objects.filter(email=email).select_related("user").first()
+
+        if not profile:
+            return Response(
+                {"message": "Coordinator account not found"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        user = profile.user
+
+        otp_obj = PasswordResetOTP.objects.filter(email=email).first()
+
+        if not otp_obj:
+            return Response(
+                {"message": "OTP not sent or expired"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if otp_obj.is_expired():
+            otp_obj.delete()
+            return Response(
+                {"message": "OTP expired. Please request again"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if otp_obj.otp != otp:
+            return Response(
+                {"message": "Invalid OTP"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if password != confirm_password:
+            return Response(
+                {"message": "Passwords do not match"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        user.set_password(password)
+        user.save()
+
+        otp_obj.delete()
+
+        return Response(
+            {"message": "Password reset successful"},
+            status=status.HTTP_200_OK
+        )
+
 
 
 

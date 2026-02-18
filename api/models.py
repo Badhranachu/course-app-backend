@@ -142,11 +142,11 @@ class StudentProfile(models.Model):
 
 class PendingCoordinator(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
-    full_name = models.CharField(max_length=100)
-    email = models.EmailField()
-    phone = models.CharField(max_length=15)
-    address = models.TextField()
-    college_name = models.CharField(max_length=150)
+    full_name = models.CharField(max_length=100,blank=False,null=False)
+    email = models.EmailField(blank=False,null=False)
+    phone = models.CharField(max_length=15,blank=False,null=False)
+    address = models.TextField(blank=False,null=False)
+    college_name = models.CharField(max_length=150,blank=False,null=False)
     photo = models.ImageField(upload_to="coordinators/passport_photos/")
     approved = models.BooleanField(default=False)  # ✔ Admin ticks this
     created_at = models.DateTimeField(auto_now_add=True)
@@ -191,12 +191,12 @@ class CoordinatorProfile(models.Model):
         on_delete=models.CASCADE,
         related_name="coordinator_profile"
     )
-    full_name = models.CharField(max_length=100)
-    email = models.EmailField()
-    phone = models.CharField(max_length=15)
-    address = models.TextField()
-    college_name = models.CharField(max_length=150)
-    photo = models.ImageField(upload_to="coordinators/passport_photos/")
+    full_name = models.CharField(max_length=100,blank=False,null=False)
+    email = models.EmailField(unique=True,blank=False,null=False)
+    phone = models.CharField(max_length=15,blank=False,null=False)
+    address = models.TextField(blank=False,null=False)
+    college_name = models.CharField(max_length=150,blank=False,null=False)
+    photo = models.ImageField(upload_to="coordinators/passport_photos/",blank=False,null=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def save(self, *args, **kwargs):
@@ -379,6 +379,7 @@ class CourseModuleItem(models.Model):
     video = models.ForeignKey(Video, null=True, blank=True, on_delete=models.CASCADE)
     test = models.ForeignKey(Test, null=True, blank=True, on_delete=models.CASCADE)
     order = models.PositiveIntegerField()
+    description = models.TextField(blank=True, null=True)
 
     class Meta:
         ordering = ["order"]
