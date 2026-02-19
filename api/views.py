@@ -1816,18 +1816,13 @@ class StudentProfileAPIView(APIView):
     permission_classes = [IsAuthenticated, IsStudent]
 
     def get(self, request):
-        """
-        Get logged-in student's profile
-        """
-        profile = StudentProfile.objects.get(user=request.user)
+        profile, _ = StudentProfile.objects.get_or_create(user=request.user)
         serializer = StudentProfileSerializer(profile)
         return Response(serializer.data)
 
     def patch(self, request):
-        """
-        Update logged-in student's profile (partial)
-        """
-        profile = StudentProfile.objects.get(user=request.user)
+        profile, _ = StudentProfile.objects.get_or_create(user=request.user)
+
         serializer = StudentProfileSerializer(
             profile,
             data=request.data,
@@ -1835,6 +1830,7 @@ class StudentProfileAPIView(APIView):
         )
         serializer.is_valid(raise_exception=True)
         serializer.save()
+
         return Response(serializer.data)
     
 
