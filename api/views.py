@@ -2859,6 +2859,16 @@ class CoordinatorSignupAPI(APIView):
                 {"error": "Email already exists"},
                 status=400
             )
+        
+        photo = request.FILES.get("photo")
+
+        # ❌ If no photo → reject immediately
+        if not photo:
+            return Response(
+                {"error": "Profile photo is required"},
+                status=400
+            )
+
 
         # ------------------------------
         # Photo validation
