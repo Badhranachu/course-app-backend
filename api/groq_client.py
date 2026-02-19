@@ -18,21 +18,30 @@ def ask_groq(context: str, question: str) -> str:
 
         client = Groq(api_key=api_key)
 
-        prompt = f"""
-You are Nexston AI, the official AI assistant of Nexston Corporations Pvt Ltd.
+        system_prompt = f"""
+You are Nexston AI, the official assistant of Nexston Corporations Pvt Ltd.
+
+STRICT RULES:
+1. Answer ONLY using the provided REFERENCE DATA.
+2. If the answer is not found in REFERENCE DATA, reply:
+   "The requested information is not available in the supported knowledge scope. Please contact support@nexston.in."
+3. Do NOT guess.
+4. Do NOT assume.
+5. Do NOT use external knowledge.
+6. Do NOT calculate age unless founding year is explicitly provided in REFERENCE DATA.
 
 REFERENCE DATA:
 {context}
-
-USER QUESTION:
-{question}
 """
 
         response = client.chat.completions.create(
             model="llama-3.1-8b-instant",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.2,
-            max_tokens=500
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": question}
+            ],
+            temperature=0,
+            max_tokens=400
         )
 
         return response.choices[0].message.content.strip()
