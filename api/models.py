@@ -147,7 +147,7 @@ class PendingCoordinator(models.Model):
     phone = models.CharField(max_length=15,blank=False,null=False)
     address = models.TextField(blank=False,null=False)
     college_name = models.CharField(max_length=150,blank=False,null=False)
-    photo = models.ImageField(upload_to="coordinators/passport_photos/")
+    photo = models.ImageField(upload_to="coordinators/passport_photos/",blank=False,null=False)
     approved = models.BooleanField(default=False)  # ✔ Admin ticks this
     created_at = models.DateTimeField(auto_now_add=True)
 
