@@ -1972,7 +1972,7 @@ class ChatWithAIView(APIView):
         session = request.session
         guest_count = session.get("guest_ai_count", 0)
 
-        if guest_count >= 2:
+        if guest_count >= 10:
             return Response(
                 {
                     "answer": "Sorry...Please log in to continue using Nexston AI."
