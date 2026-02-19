@@ -67,7 +67,7 @@ def generate_certificate(*, user, course):
     # ===============================
     enrollment = Enrollment.objects.get(user=user, course=course)
     start_date = enrollment.enrolled_at.date()
-    end_date = start_date + timedelta(days=42)
+    end_date = start_date + timedelta(minutes=10)
 
     # ===============================
     # DATE + REF NUMBER
