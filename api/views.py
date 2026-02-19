@@ -38,8 +38,6 @@ razorpay_client = razorpay.Client(
 # ------------------------------------------------------------
 # AUTH
 # ------------------------------------------------------------
-from api.models import UserToken
-from api.models import UserToken
 
 class SignupAPIView(APIView):
     permission_classes = [permissions.AllowAny]
@@ -50,18 +48,15 @@ class SignupAPIView(APIView):
         if serializer.is_valid():
             user = serializer.save()
 
-            # 🔐 Create persistent DB token
-            token, _ = UserToken.objects.get_or_create(user=user)
-
             return Response({
-                "user": UserSerializer(user).data,
-                "token": token.token   # ✅ persistent token
+                "user": UserSerializer(user).data
             }, status=status.HTTP_201_CREATED)
 
         return Response(
             {"errors": serializer.errors},
             status=status.HTTP_400_BAD_REQUEST
         )
+
 
 
 User = get_user_model()
@@ -79,22 +74,11 @@ class LoginAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # ✅ Normalize email
         email = email.strip().lower()
 
-        # 🔎 1️⃣ Check if account exists
-        user_exists = User.objects.filter(email=email).first()
-
-        if not user_exists:
-            return Response(
-                {"error": "Account not registered"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # 🔐 2️⃣ Authenticate password
         user = authenticate(
             request=request,
-            username=email,   # email is USERNAME_FIELD
+            username=email,
             password=password
         )
 
@@ -104,31 +88,33 @@ class LoginAPIView(APIView):
                 status=status.HTTP_401_UNAUTHORIZED
             )
 
-        # 🚫 3️⃣ Check if disabled
         if not user.is_active:
             return Response(
                 {"error": "Account is disabled"},
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        # 🔑 4️⃣ Generate / get token
-        token, _ = UserToken.objects.get_or_create(user=user)
-        token.mark_used()
+        if not hasattr(user, "student_profile"):
+            return Response(
+                {"error": "Only students can login"},
+                status=status.HTTP_403_FORBIDDEN
+            )
 
-        # 🔹 Safe name handling
-        name = None
-        if user.role == "student" and hasattr(user, "student_profile"):
-            name = user.student_profile.full_name
-        elif user.role == "admin" and hasattr(user, "admin_profile"):
-            name = user.admin_profile.full_name
+        student_profile = user.student_profile
+
+        # 🔥 Generate JWT tokens
+        refresh = RefreshToken.for_user(user)
 
         return Response({
-            "token": token.token,
+            "access": str(refresh.access_token),
+            "refresh": str(refresh),
             "user": {
                 "id": user.id,
                 "email": user.email,
                 "role": user.role,
-                "name": name,
+                "name": student_profile.full_name,
+                "gender": student_profile.gender,
+                "college_name": student_profile.college_name,
             }
         }, status=status.HTTP_200_OK)
 
@@ -238,7 +224,6 @@ class CourseListCreateAPIView(APIView):
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-from api.authentication import UserTokenAuthentication
 
 class CourseDetailAPIView(APIView):
     """
@@ -247,7 +232,8 @@ class CourseDetailAPIView(APIView):
     DELETE → Delete course (admin only)
     """
 
-    authentication_classes = [UserTokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
 
     def get_permissions(self):
         # 🔐 ALL methods require authentication
@@ -323,7 +309,6 @@ def get_user_unlock_status(user, course):
 # ------------------------------------------------------------
 
 class CourseModulesAPIView(APIView):
-    authentication_classes = [UserTokenAuthentication]
     permission_classes = [IsAuthenticated]
 
     def get(self, request, course_id):
@@ -2490,11 +2475,21 @@ class ForgotPasswordAPIView(APIView):
 
         email = serializer.validated_data["email"]
 
-        if not User.objects.filter(email=email).exists():
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
             return Response(
                 {"message": "Email not registered"},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+        # 🚫 Only allow students
+        if not hasattr(user, "student_profile"):
+            return Response(
+                {"message": "Password reset allowed only for students"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
 
         existing_otp = PasswordResetOTP.objects.filter(email=email).first()
 
@@ -2540,11 +2535,20 @@ class ResendForgotPasswordOTPAPIView(APIView):
         serializer.is_valid(raise_exception=True)
         email = serializer.validated_data["email"]
 
-        if not User.objects.filter(email=email).exists():
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
             return Response(
                 {"message": "Email not registered"},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+        if not hasattr(user, "student_profile"):
+            return Response(
+                {"message": "Password reset allowed only for students"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
 
         otp_obj = PasswordResetOTP.objects.filter(email=email).first()
 
@@ -2664,17 +2668,13 @@ User = get_user_model()
 class CoordinatorForgotPasswordAPIView(APIView):
     permission_classes = []
 
-    def generate_otp(self):
-        return str(random.randint(100000, 999999))
-
     def post(self, request):
         serializer = SendOTPSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         email = serializer.validated_data["email"]
 
-        # ✅ Validate using CoordinatorProfile
-        profile = CoordinatorProfile.objects.filter(email=email).select_related("user").first()
+        profile = CoordinatorProfile.objects.filter(email=email).first()
 
         if not profile:
             return Response(
@@ -2682,20 +2682,20 @@ class CoordinatorForgotPasswordAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        user = profile.user
+        otp_obj = PasswordResetOTP.objects.filter(email=email).first()
 
-        existing_otp = PasswordResetOTP.objects.filter(email=email).first()
-
-        if existing_otp and not existing_otp.is_expired():
+        # If OTP exists and not expired
+        if otp_obj and not otp_obj.is_expired():
             return Response(
                 {"message": "OTP already sent. Please check your email."},
                 status=status.HTTP_200_OK
             )
 
-        if existing_otp:
-            existing_otp.delete()
+        # Delete expired OTP
+        if otp_obj:
+            otp_obj.delete()
 
-        otp = self.generate_otp()
+        otp = generate_otp()
 
         PasswordResetOTP.objects.create(
             email=email,
@@ -2716,11 +2716,9 @@ class CoordinatorForgotPasswordAPIView(APIView):
         )
 
 
+
 class CoordinatorResendForgotPasswordOTPAPIView(APIView):
     permission_classes = []
-
-    def generate_otp(self):
-        return str(random.randint(100000, 999999))
 
     def post(self, request):
         serializer = SendOTPSerializer(data=request.data)
@@ -2728,7 +2726,7 @@ class CoordinatorResendForgotPasswordOTPAPIView(APIView):
 
         email = serializer.validated_data["email"]
 
-        profile = CoordinatorProfile.objects.filter(email=email).select_related("user").first()
+        profile = CoordinatorProfile.objects.filter(email=email).first()
 
         if not profile:
             return Response(
@@ -2751,13 +2749,14 @@ class CoordinatorResendForgotPasswordOTPAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        if otp_obj.resend_count >= 1:
+        # Limit resend attempts
+        if otp_obj.resend_count >= 3:
             return Response(
-                {"message": "Please wait before resending OTP"},
+                {"message": "Maximum resend attempts reached"},
                 status=status.HTTP_429_TOO_MANY_REQUESTS
             )
 
-        otp_obj.otp = self.generate_otp()
+        otp_obj.otp = generate_otp()
         otp_obj.resend_count += 1
         otp_obj.save()
 
@@ -2773,7 +2772,6 @@ class CoordinatorResendForgotPasswordOTPAPIView(APIView):
             {"message": "OTP resent successfully"},
             status=status.HTTP_200_OK
         )
-
 
 
 
@@ -2928,45 +2926,67 @@ class CoordinatorLoginAPI(APIView):
 
     def post(self, request):
         email = request.data.get("email")
-        phone = request.data.get("phone")
         password = request.data.get("password")
 
-        if not email or not password or not phone:
+        if not email or not password:
             return Response(
-                {"error": "Email, phone and password required"},
+                {"error": "Email and password required"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         email = email.strip().lower()
 
-        try:
-            user = CustomUser.objects.get(email=email)
-        except CustomUser.DoesNotExist:
-            return Response({"error": "Invalid credentials"}, status=401)
+        # 🔎 Check coordinator profile exists
+        profile = CoordinatorProfile.objects.filter(
+            email=email
+        ).select_related("user").first()
 
-        # Check password manually (works even if inactive)
-        if not user.check_password(password):
-            return Response({"error": "Invalid credentials"}, status=401)
+        if not profile:
+            pending = PendingCoordinator.objects.filter(
+                user__email=email
+            ).exists()
 
-        # 1) Pending approval check (before active check)
-        if PendingCoordinator.objects.filter(user=user, phone=phone).exists():
+            if pending:
+                return Response(
+                    {"error": "Your registration is submitted. Please wait for admin approval."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
             return Response(
-                {"error": "Your registration is submitted. Please wait for admin approval."},
-                status=403
+                {"error": "Invalid credentials"},
+                status=status.HTTP_401_UNAUTHORIZED
             )
 
-        # 2) Approved coordinator check
-        if not CoordinatorProfile.objects.filter(user=user, phone=phone).exists():
-            return Response({"error": "Invalid credentials"}, status=401)
+        user = authenticate(
+            request=request,
+            username=email,
+            password=password
+        )
 
-        # 3) Generate token
-        token, _ = UserToken.objects.get_or_create(user=user)
-        token.mark_used()
+        if not user:
+            return Response(
+                {"error": "Invalid credentials"},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
 
-        profile = CoordinatorProfile.objects.get(user=user, phone=phone)
+        if not user.is_active:
+            return Response(
+                {"error": "Account is disabled"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        if user.role != "coordinator":
+            return Response(
+                {"error": "Unauthorized access"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # 🔥 Generate JWT tokens
+        refresh = RefreshToken.for_user(user)
 
         return Response({
-            "token": token.token,
+            "access": str(refresh.access_token),
+            "refresh": str(refresh),
             "user": {
                 "id": user.id,
                 "email": user.email,
@@ -2974,10 +2994,7 @@ class CoordinatorLoginAPI(APIView):
                 "name": profile.full_name,
                 "coordinator_id": profile.coordinator_id
             }
-        })
-
-
-
+        }, status=status.HTTP_200_OK)
 
 from api.serializers import CoordinatorProfileSerializer
 class CoordinatorProfileAPI(APIView):

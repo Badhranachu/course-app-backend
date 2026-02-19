@@ -14,36 +14,41 @@ class UserSerializer(serializers.ModelSerializer):
 
 from api.models import StudentProfile
 class UserSignupSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(
-        write_only=True,
-        validators=[validate_password]
-    )
+    password = serializers.CharField(write_only=True)
     password2 = serializers.CharField(write_only=True)
     full_name = serializers.CharField(write_only=True)
-    gender = serializers.ChoiceField(
-        choices=[("male", "Male"), ("female", "Female")],
-        write_only=True
-    )
+    gender = serializers.ChoiceField(choices=[("male", "Male"), ("female", "Female")])
+    phone = serializers.CharField(write_only=True)
+    college_name = serializers.CharField(write_only=True)
+    batch = serializers.CharField(write_only=True)
 
     class Meta:
         model = CustomUser
-        fields = ["email", "full_name", "gender", "password", "password2"]
+        fields = [
+            "email",
+            "full_name",
+            "gender",
+            "phone",
+            "college_name",
+            "batch",
+            "password",
+            "password2",
+        ]
 
     def validate(self, attrs):
-        # ✅ normalize email
         attrs["email"] = attrs["email"].strip().lower()
 
-        # ✅ password match check
         if attrs["password"] != attrs["password2"]:
-            raise serializers.ValidationError({
-                "password": ["Passwords do not match"]
-            })
+            raise serializers.ValidationError({"password": "Passwords do not match"})
 
-        return attrs  # ✅ REQUIRED
+        return attrs
 
     def create(self, validated_data):
         full_name = validated_data.pop("full_name")
         gender = validated_data.pop("gender")
+        phone = validated_data.pop("phone")
+        college_name = validated_data.pop("college_name")
+        batch = validated_data.pop("batch")
         validated_data.pop("password2")
 
         user = CustomUser.objects.create_user(
@@ -55,10 +60,14 @@ class UserSignupSerializer(serializers.ModelSerializer):
         StudentProfile.objects.create(
             user=user,
             full_name=full_name,
-            gender=gender
+            gender=gender,
+            phone=phone,
+            college_name=college_name,
+            batch=batch
         )
 
         return user
+
 
 class VideoSerializer(serializers.ModelSerializer):
     class Meta:
@@ -343,9 +352,8 @@ class StudentProfileSerializer(serializers.ModelSerializer):
             "full_name",
             "phone",
             "college_name",
-            "course_name",
-            "github_url",
             "created_at",
+            "batch"
         )
         read_only_fields = ("created_at","email","course_name",)
 

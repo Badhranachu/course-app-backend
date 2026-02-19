@@ -274,7 +274,7 @@ def delayed_transfer_and_email(precert_id):
 
     # ---------- ELIGIBILITY TIME ----------
     payment_time = payment.created_at
-    eligible_at = payment_time + timedelta(minutes=5)  # change if needed
+    eligible_at = payment_time + timedelta(days=42)  # change if needed
 
     if timezone.now() < eligible_at:
         return

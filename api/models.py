@@ -27,29 +27,29 @@ class MediaFile(models.Model):
 # USER TOKEN
 # =====================================================
 
-class UserToken(models.Model):
-    user = models.OneToOneField(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name="auth_token"
-    )
-    token = models.CharField(max_length=64, unique=True, editable=False)
-    is_active = models.BooleanField(default=True)
+# class UserToken(models.Model):
+#     user = models.OneToOneField(
+#         settings.AUTH_USER_MODEL,
+#         on_delete=models.CASCADE,
+#         related_name="auth_token"
+#     )
+#     token = models.CharField(max_length=64, unique=True, editable=False)
+#     is_active = models.BooleanField(default=True)
 
-    created_at = models.DateTimeField(auto_now_add=True)
-    last_used_at = models.DateTimeField(null=True, blank=True)
+#     created_at = models.DateTimeField(auto_now_add=True)
+#     last_used_at = models.DateTimeField(null=True, blank=True)
 
-    def save(self, *args, **kwargs):
-        if not self.token:
-            self.token = uuid.uuid4().hex
-        super().save(*args, **kwargs)
+#     def save(self, *args, **kwargs):
+#         if not self.token:
+#             self.token = uuid.uuid4().hex
+#         super().save(*args, **kwargs)
 
-    def mark_used(self):
-        self.last_used_at = timezone.now()
-        self.save(update_fields=["last_used_at"])
+#     def mark_used(self):
+#         self.last_used_at = timezone.now()
+#         self.save(update_fields=["last_used_at"])
 
-    def __str__(self):
-        return f"{self.user.email} → {self.token[:8]}..."
+#     def __str__(self):
+#         return f"{self.user.email} → {self.token[:8]}..."
 
 
 # =====================================================
@@ -124,15 +124,30 @@ class StudentProfile(models.Model):
         ("male", "Male"),
         ("female", "Female"),
     )
+    BATCH_CHOICES = [
+        ("2024", "2024"),
+        ("2025", "2025"),
+        ("2026", "2026"),
+        ("2027", "2027"),
+        ("2028", "2028"),
+        ("2029", "2029"),
+    ]
+
+    batch = models.CharField(
+    max_length=4,
+    choices=BATCH_CHOICES,
+    default="2024"   # temporary default
+    )
+
+
     gender = models.CharField(
         max_length=10,
         choices=GENDER_CHOICES
     )
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="student_profile")
     full_name = models.CharField(max_length=100)
-    phone = models.CharField(max_length=15, blank=True)
+    phone = models.CharField(max_length=15,unique=True)
     college_name = models.CharField(max_length=150, blank=True)
-    course_name = models.CharField(max_length=100, blank=True)
     github_url = models.URLField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -144,7 +159,7 @@ class PendingCoordinator(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     full_name = models.CharField(max_length=100,blank=False,null=False)
     email = models.EmailField(blank=False,null=False)
-    phone = models.CharField(max_length=15,blank=False,null=False)
+    phone = models.CharField(max_length=15,blank=False,null=False,unique=True)
     address = models.TextField(blank=False,null=False)
     college_name = models.CharField(max_length=150,blank=False,null=False)
     photo = models.ImageField(upload_to="coordinators/passport_photos/",blank=False,null=False)
@@ -193,7 +208,9 @@ class CoordinatorProfile(models.Model):
     )
     full_name = models.CharField(max_length=100,blank=False,null=False)
     email = models.EmailField(unique=True,blank=False,null=False)
-    phone = models.CharField(max_length=15,blank=False,null=False)
+    phone = models.CharField(max_length=15)
+
+
     address = models.TextField(blank=False,null=False)
     college_name = models.CharField(max_length=150,blank=False,null=False)
     photo = models.ImageField(upload_to="coordinators/passport_photos/",blank=False,null=False)
