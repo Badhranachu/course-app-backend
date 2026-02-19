@@ -2849,30 +2849,64 @@ class CoordinatorSignupAPI(APIView):
 
     def post(self, request):
         data = request.data
+        photo = request.FILES.get("photo")
 
-        if CustomUser.objects.filter(email=data["email"]).exists():
-            return Response({"error": "Email already exists"}, status=400)
+        # ------------------------------
+        # Email already exists
+        # ------------------------------
+        if CustomUser.objects.filter(email=data.get("email")).exists():
+            return Response(
+                {"error": "Email already exists"},
+                status=400
+            )
 
+        # ------------------------------
+        # Photo validation
+        # ------------------------------
+        if photo:
+            # 1️⃣ Check file size (2MB = 2 * 1024 * 1024)
+            if photo.size > 2 * 1024 * 1024:
+                return Response(
+                    {"error": "Image size must be under 2MB"},
+                    status=400
+                )
+
+            # 2️⃣ Check content type
+            if not photo.content_type.startswith("image/"):
+                return Response(
+                    {"error": "Only image files are allowed. No other files not permitted."},
+                    status=400
+                )
+
+        # ------------------------------
+        # Create User
+        # ------------------------------
         user = CustomUser.objects.create_user(
-            email=data["email"],
-            password=data["password"],
+            email=data.get("email"),
+            password=data.get("password"),
             role="coordinator",
             is_active=False
         )
 
+        # ------------------------------
+        # Create Pending Coordinator
+        # ------------------------------
         PendingCoordinator.objects.create(
             user=user,
-            full_name=data["full_name"],
-            email=data["email"],
-            phone=data["phone"],
-            address=data["address"],
-            college_name=data["college_name"],
-            photo=data["photo"]
+            full_name=data.get("full_name"),
+            email=data.get("email"),
+            phone=data.get("phone"),
+            address=data.get("address"),
+            college_name=data.get("college_name"),
+            photo=photo
         )
 
-        return Response({
-            "message": "Registration submitted. Waiting for admin approval."
-        }, status=201)
+        return Response(
+            {
+                "message": "Registration submitted. Waiting for admin approval."
+            },
+            status=201
+        )
 
 
 from django.contrib.auth import get_user_model
