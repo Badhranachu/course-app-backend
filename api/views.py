@@ -2857,30 +2857,30 @@ class CoordinatorSignupAPI(APIView):
         photo = request.FILES.get("photo")
 
         # ❌ If no photo → reject immediately
+        # ------------------------------
+        # Photo validation (ONLY JPEG & PNG, <2MB)
+        # ------------------------------
         if not photo:
             return Response(
                 {"error": "Profile photo is required"},
                 status=400
             )
 
+        # 1️⃣ Check file size (2MB)
+        if photo.size > 2 * 1024 * 1024:
+            return Response(
+                {"error": "Image must be under 2MB"},
+                status=400
+            )
 
-        # ------------------------------
-        # Photo validation
-        # ------------------------------
-        if photo:
-            # 1️⃣ Check file size (2MB = 2 * 1024 * 1024)
-            if photo.size > 2 * 1024 * 1024:
-                return Response(
-                    {"error": "Image size must be under 2MB"},
-                    status=400
-                )
+        # 2️⃣ Allow ONLY JPEG and PNG
+        allowed_types = ["image/jpeg", "image/png"]
 
-            # 2️⃣ Check content type
-            if not photo.content_type.startswith("image/"):
-                return Response(
-                    {"error": "Only image files are allowed. No other files not permitted."},
-                    status=400
-                )
+        if photo.content_type not in allowed_types:
+            return Response(
+                {"error": "Only JPEG and PNG images are allowed"},
+                status=400
+            )
 
         # ------------------------------
         # Create User
