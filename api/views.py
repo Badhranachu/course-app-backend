@@ -132,18 +132,32 @@ class SendEmailOTPAPIView(APIView):
         if not email:
             return Response({"error": "Email required"}, status=400)
 
+        email = email.strip().lower()
+
+        # 🔥 CHECK IF USER ALREADY EXISTS
+        if CustomUser.objects.filter(email=email).exists():
+            return Response(
+                {"error": "Email already registered"},
+                status=400
+            )
+
+        # ✅ If not exists → generate OTP
         otp = str(random.randint(100000, 999999))
 
-        obj, _ = EmailOTP.objects.update_or_create(
+        EmailOTP.objects.update_or_create(
             email=email,
-            defaults={"otp": otp, "is_verified": False}
+            defaults={
+                "otp": otp,
+                "is_verified": False
+            }
         )
 
         send_otp_email(email, otp)
 
-        return Response({"message": "OTP sent successfully"}, status=200)
-    
-
+        return Response(
+            {"message": "OTP sent successfully"},
+            status=200
+        )
 
 class VerifyEmailOTPAPIView(APIView):
     permission_classes = [permissions.AllowAny]
