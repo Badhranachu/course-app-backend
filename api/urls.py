@@ -241,6 +241,10 @@ path(
     path("coordinator/request-payout/", views.RequestCoordinatorPayoutAPIView.as_view()),
     path("coordinator/payout-dashboard/", views.CoordinatorPaymentDashboardAPIView.as_view()),
 
+    # SEO
+    path("seo/page/", views.SEOPageMetaAPIView.as_view()),
+    path("seo/course/<int:course_id>/", views.SEOCourseMetaAPIView.as_view()),
+    path("seo/job/<int:job_id>/", views.SEOJobMetaAPIView.as_view()),
 
 
   

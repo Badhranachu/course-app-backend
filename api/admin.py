@@ -5,11 +5,15 @@ from django.utils import timezone
 
 from .models import (
     Course,
+    CourseSEOMeta,
     CourseModuleItem,
+    JobSEOMeta,
+    SEOPageMeta,
     SupportTicket,
     Video,
     Contactus,
 )
+
 
 # =====================================================
 # VIDEO ADMIN FORM
@@ -45,10 +49,7 @@ class VideoAdmin(admin.ModelAdmin):
     list_filter = ("course",)
 
     readonly_fields = (
-        # "duration",
         "created_at",
-        # "video_url",
-
     )
 
     fields = (
@@ -156,7 +157,7 @@ class ContactusAdmin(admin.ModelAdmin):
         "email",
         "subject",
         "message",
-        "status",        # dropdown
+        "status",
         "contacted_at",
         "created_at",
     )
@@ -167,10 +168,29 @@ class ContactusAdmin(admin.ModelAdmin):
         super().save_model(request, obj, form, change)
 
 
+@admin.register(SEOPageMeta)
+class SEOPageMetaAdmin(admin.ModelAdmin):
+    list_display = ("route_key", "meta_title", "is_active", "updated_at")
+    search_fields = ("route_key", "meta_title")
+    list_filter = ("is_active", "updated_at")
 
 
-from django.utils import timezone
-from api.models import CoordinatorPayout,CoordinatorStudent
+@admin.register(CourseSEOMeta)
+class CourseSEOMetaAdmin(admin.ModelAdmin):
+    list_display = ("course", "meta_title", "is_active", "updated_at")
+    search_fields = ("course__title", "meta_title")
+    list_filter = ("is_active", "updated_at")
+
+
+@admin.register(JobSEOMeta)
+class JobSEOMetaAdmin(admin.ModelAdmin):
+    list_display = ("job", "meta_title", "is_active", "updated_at")
+    search_fields = ("job__name", "meta_title")
+    list_filter = ("is_active", "updated_at")
+
+
+from api.models import CoordinatorPayout, CoordinatorStudent
+
 
 class CoordinatorStudentInline(admin.TabularInline):
     model = CoordinatorStudent
@@ -187,7 +207,6 @@ class CoordinatorStudentInline(admin.TabularInline):
 
 @admin.register(CoordinatorPayout)
 class CoordinatorPayoutAdmin(admin.ModelAdmin):
-
     list_display = (
         "coordinator",
         "total_students",
@@ -198,26 +217,22 @@ class CoordinatorPayoutAdmin(admin.ModelAdmin):
     )
 
     list_filter = ("status", "requested_at")
-
     inlines = [CoordinatorStudentInline]
 
     def save_model(self, request, obj, form, change):
-
         if change:
             previous = CoordinatorPayout.objects.get(pk=obj.pk)
 
-            # Approve payout
             if previous.status == "pending" and obj.status == "approved":
                 obj.processed_at = timezone.now()
                 obj.students.update(is_paid=True)
 
-            # Reject payout
             if previous.status == "pending" and obj.status == "rejected":
                 obj.students.update(payout_reference=None)
 
         super().save_model(request, obj, form, change)
 
-from api.models import CoordinatorPayout
+
 # =====================================================
 # AUTO-REGISTER ALL OTHER MODELS
 # =====================================================
@@ -226,9 +241,11 @@ EXCLUDE_MODELS = {
     Video,
     CourseModuleItem,
     SupportTicket,
-    Contactus,   # ✅ IMPORTANT FIX
-    CoordinatorPayout
-    
+    Contactus,
+    CoordinatorPayout,
+    SEOPageMeta,
+    CourseSEOMeta,
+    JobSEOMeta,
 }
 
 for model in app.get_models():

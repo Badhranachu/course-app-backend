@@ -717,6 +717,65 @@ class Job(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class SEOPageMeta(models.Model):
+    route_key = models.CharField(max_length=200, unique=True)
+    meta_title = models.CharField(max_length=255)
+    meta_description = models.CharField(max_length=320, blank=True)
+    meta_keywords = models.CharField(max_length=500, blank=True)
+    og_title = models.CharField(max_length=255, blank=True)
+    og_description = models.CharField(max_length=320, blank=True)
+    og_image = models.URLField(blank=True)
+    canonical_url = models.URLField(blank=True)
+    robots = models.CharField(max_length=120, default="index,follow")
+    is_active = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"SEO Static: {self.route_key}"
+
+
+class CourseSEOMeta(models.Model):
+    course = models.OneToOneField(
+        Course,
+        on_delete=models.CASCADE,
+        related_name="seo_meta",
+    )
+    meta_title = models.CharField(max_length=255, blank=True)
+    meta_description = models.CharField(max_length=320, blank=True)
+    meta_keywords = models.CharField(max_length=500, blank=True)
+    og_title = models.CharField(max_length=255, blank=True)
+    og_description = models.CharField(max_length=320, blank=True)
+    og_image = models.URLField(blank=True)
+    canonical_url = models.URLField(blank=True)
+    robots = models.CharField(max_length=120, default="index,follow")
+    is_active = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"SEO Course: {self.course.title}"
+
+
+class JobSEOMeta(models.Model):
+    job = models.OneToOneField(
+        Job,
+        on_delete=models.CASCADE,
+        related_name="seo_meta",
+    )
+    meta_title = models.CharField(max_length=255, blank=True)
+    meta_description = models.CharField(max_length=320, blank=True)
+    meta_keywords = models.CharField(max_length=500, blank=True)
+    og_title = models.CharField(max_length=255, blank=True)
+    og_description = models.CharField(max_length=320, blank=True)
+    og_image = models.URLField(blank=True)
+    canonical_url = models.URLField(blank=True)
+    robots = models.CharField(max_length=120, default="index,follow")
+    is_active = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"SEO Job: {self.job.name}"
     
 
 class CoordinatorContact(models.Model):

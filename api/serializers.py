@@ -446,6 +446,61 @@ class CoordinatorContactSerializer(serializers.ModelSerializer):
         fields = ["id", "name", "email", "phone", "created_at"]
 
 
+from .models import CourseSEOMeta, JobSEOMeta, SEOPageMeta
+
+
+class SEOPageMetaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SEOPageMeta
+        fields = [
+            "route_key",
+            "meta_title",
+            "meta_description",
+            "meta_keywords",
+            "og_title",
+            "og_description",
+            "og_image",
+            "canonical_url",
+            "robots",
+            "is_active",
+            "updated_at",
+        ]
+
+
+class CourseSEOMetaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CourseSEOMeta
+        fields = [
+            "meta_title",
+            "meta_description",
+            "meta_keywords",
+            "og_title",
+            "og_description",
+            "og_image",
+            "canonical_url",
+            "robots",
+            "is_active",
+            "updated_at",
+        ]
+
+
+class JobSEOMetaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = JobSEOMeta
+        fields = [
+            "meta_title",
+            "meta_description",
+            "meta_keywords",
+            "og_title",
+            "og_description",
+            "og_image",
+            "canonical_url",
+            "robots",
+            "is_active",
+            "updated_at",
+        ]
+
+
 
 
 

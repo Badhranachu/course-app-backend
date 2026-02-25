@@ -20,12 +20,14 @@ User = get_user_model()
 from .models import (
     CustomUser, Course, Video, Enrollment,
     CourseModuleItem, Test,
-    StudentTest, StudentAnswer, Question
+    StudentTest, StudentAnswer, Question,
+    SEOPageMeta
 )
 from .serializers import (
     UserSerializer, UserSignupSerializer, CourseSerializer,
     CourseListSerializer, VideoSerializer, EnrollmentSerializer,
-    CourseModuleSerializer, TestDetailSerializer
+    CourseModuleSerializer, TestDetailSerializer,
+    SEOPageMetaSerializer, CourseSEOMetaSerializer, JobSEOMetaSerializer
 )
 
 # ------------------------------------------------------------
@@ -3395,3 +3397,96 @@ class CoordinatorPaymentDashboardAPIView(APIView):
                 else "Minimum 5 students required"
             )
         })
+
+
+def _build_seo_payload(base_title="", base_description="", image_url="", overrides=None):
+    overrides = overrides or {}
+
+    title = overrides.get("meta_title") or base_title or "Nexston"
+    description = overrides.get("meta_description") or base_description or ""
+    og_title = overrides.get("og_title") or title
+    og_description = overrides.get("og_description") or description
+
+    return {
+        "title": title,
+        "description": description,
+        "keywords": overrides.get("meta_keywords", ""),
+        "og_title": og_title,
+        "og_description": og_description,
+        "og_image": overrides.get("og_image") or image_url or "",
+        "canonical_url": overrides.get("canonical_url", ""),
+        "robots": overrides.get("robots") or "index,follow",
+    }
+
+
+class SEOPageMetaAPIView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        route_key = (request.query_params.get("route") or "/").strip()
+        try:
+            seo = SEOPageMeta.objects.get(route_key=route_key, is_active=True)
+        except SEOPageMeta.DoesNotExist:
+            return Response(
+                _build_seo_payload(
+                    base_title="Nexston",
+                    base_description="Nexston digital engineering and internship programs.",
+                )
+            )
+
+        data = SEOPageMetaSerializer(seo).data
+        return Response(
+            _build_seo_payload(
+                overrides=data,
+            )
+        )
+
+
+class SEOCourseMetaAPIView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request, course_id):
+        course = get_object_or_404(Course, id=course_id)
+        seo = getattr(course, "seo_meta", None)
+        seo_data = {}
+
+        if seo and seo.is_active:
+            seo_data = CourseSEOMetaSerializer(seo).data
+
+        image_url = ""
+        if getattr(course, "image", None):
+            image_url = f"https://cdn.nexston.in/{course.image.name}"
+
+        return Response(
+            _build_seo_payload(
+                base_title=course.title,
+                base_description=course.description[:320],
+                image_url=image_url,
+                overrides=seo_data,
+            )
+        )
+
+
+class SEOJobMetaAPIView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request, job_id):
+        job = get_object_or_404(Job, id=job_id)
+        seo = getattr(job, "seo_meta", None)
+        seo_data = {}
+
+        if seo and seo.is_active:
+            seo_data = JobSEOMetaSerializer(seo).data
+
+        image_url = ""
+        if getattr(job, "image", None):
+            image_url = f"https://cdn.nexston.in/{job.image.name}"
+
+        return Response(
+            _build_seo_payload(
+                base_title=job.name,
+                base_description=job.description[:320],
+                image_url=image_url,
+                overrides=seo_data,
+            )
+        )
