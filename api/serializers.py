@@ -453,6 +453,7 @@ class SEOPageMetaSerializer(serializers.ModelSerializer):
     class Meta:
         model = SEOPageMeta
         fields = [
+            "id",
             "route_key",
             "meta_title",
             "meta_description",
@@ -468,9 +469,15 @@ class SEOPageMetaSerializer(serializers.ModelSerializer):
 
 
 class CourseSEOMetaSerializer(serializers.ModelSerializer):
+    course_id = serializers.IntegerField(source="course.id", read_only=True)
+    course_title = serializers.CharField(source="course.title", read_only=True)
+
     class Meta:
         model = CourseSEOMeta
         fields = [
+            "id",
+            "course_id",
+            "course_title",
             "meta_title",
             "meta_description",
             "meta_keywords",
@@ -485,9 +492,15 @@ class CourseSEOMetaSerializer(serializers.ModelSerializer):
 
 
 class JobSEOMetaSerializer(serializers.ModelSerializer):
+    job_id = serializers.IntegerField(source="job.id", read_only=True)
+    job_name = serializers.CharField(source="job.name", read_only=True)
+
     class Meta:
         model = JobSEOMeta
         fields = [
+            "id",
+            "job_id",
+            "job_name",
             "meta_title",
             "meta_description",
             "meta_keywords",

@@ -19,3 +19,13 @@ class IsAdminUserRole(BasePermission):
             and request.user.role == "admin"
             and request.user.is_active
         )
+
+
+class IsSEOUserRole(BasePermission):
+    def has_permission(self, request, view):
+        return (
+            request.user.is_authenticated
+            and request.user.role == "seo"
+            and request.user.is_active
+            and hasattr(request.user, "seo_profile")
+        )

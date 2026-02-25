@@ -120,6 +120,58 @@ class LoginAPIView(APIView):
             }
         }, status=status.HTTP_200_OK)
 
+
+class SEOLoginAPIView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        email = request.data.get("email")
+        password = request.data.get("password")
+
+        if not email or not password:
+            return Response(
+                {"error": "Email and password required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        email = email.strip().lower()
+        user = authenticate(request=request, username=email, password=password)
+
+        if not user:
+            return Response(
+                {"error": "Invalid credentials"},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+
+        if not user.is_active:
+            return Response(
+                {"error": "Account is disabled"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        if user.role != "seo":
+            return Response(
+                {"error": "Only SEO users can login here"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        if not hasattr(user, "seo_profile"):
+            return Response(
+                {"error": "SEO profile not found for this account"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        refresh = RefreshToken.for_user(user)
+        return Response({
+            "access": str(refresh.access_token),
+            "refresh": str(refresh),
+            "user": {
+                "id": user.id,
+                "email": user.email,
+                "role": user.role,
+            }
+        }, status=status.HTTP_200_OK)
+
 from api.models import EmailOTP
 import random
 from api.utils import send_otp_email
@@ -2056,7 +2108,7 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from .models import Video
-from api.permissions import IsAdminUserRole
+from api.permissions import IsAdminUserRole, IsSEOUserRole
 
 from rest_framework.views import APIView
 from rest_framework.parsers import MultiPartParser, FormParser
@@ -3490,3 +3542,103 @@ class SEOJobMetaAPIView(APIView):
                 overrides=seo_data,
             )
         )
+
+
+class SEOPageMetaAdminListCreateAPIView(APIView):
+    permission_classes = [IsAuthenticated, IsSEOUserRole]
+
+    def get(self, request):
+        items = SEOPageMeta.objects.all().order_by("route_key")
+        return Response(SEOPageMetaSerializer(items, many=True).data)
+
+    def post(self, request):
+        serializer = SEOPageMetaSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class SEOPageMetaAdminDetailAPIView(APIView):
+    permission_classes = [IsAuthenticated, IsSEOUserRole]
+
+    def get(self, request, pk):
+        item = get_object_or_404(SEOPageMeta, pk=pk)
+        return Response(SEOPageMetaSerializer(item).data)
+
+    def patch(self, request, pk):
+        item = get_object_or_404(SEOPageMeta, pk=pk)
+        serializer = SEOPageMetaSerializer(item, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
+
+    def delete(self, request, pk):
+        item = get_object_or_404(SEOPageMeta, pk=pk)
+        item.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class SEOCourseMetaAdminAPIView(APIView):
+    permission_classes = [IsAuthenticated, IsSEOUserRole]
+
+    def get(self, request, course_id):
+        course = get_object_or_404(Course, id=course_id)
+        meta = getattr(course, "seo_meta", None)
+        if not meta:
+            return Response(
+                {"course_id": course.id, "course_title": course.title},
+                status=status.HTTP_200_OK
+            )
+        return Response(CourseSEOMetaSerializer(meta).data)
+
+    def post(self, request, course_id):
+        course = get_object_or_404(Course, id=course_id)
+        data = request.data.copy()
+        meta = getattr(course, "seo_meta", None)
+
+        if meta:
+            serializer = CourseSEOMetaSerializer(meta, data=data, partial=True)
+        else:
+            serializer = CourseSEOMetaSerializer(data=data)
+
+        serializer.is_valid(raise_exception=True)
+
+        if meta:
+            serializer.save()
+        else:
+            serializer.save(course=course)
+
+        return Response(serializer.data)
+
+
+class SEOJobMetaAdminAPIView(APIView):
+    permission_classes = [IsAuthenticated, IsSEOUserRole]
+
+    def get(self, request, job_id):
+        job = get_object_or_404(Job, id=job_id)
+        meta = getattr(job, "seo_meta", None)
+        if not meta:
+            return Response(
+                {"job_id": job.id, "job_name": job.name},
+                status=status.HTTP_200_OK
+            )
+        return Response(JobSEOMetaSerializer(meta).data)
+
+    def post(self, request, job_id):
+        job = get_object_or_404(Job, id=job_id)
+        data = request.data.copy()
+        meta = getattr(job, "seo_meta", None)
+
+        if meta:
+            serializer = JobSEOMetaSerializer(meta, data=data, partial=True)
+        else:
+            serializer = JobSEOMetaSerializer(data=data)
+
+        serializer.is_valid(raise_exception=True)
+
+        if meta:
+            serializer.save()
+        else:
+            serializer.save(job=job)
+
+        return Response(serializer.data)

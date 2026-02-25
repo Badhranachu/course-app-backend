@@ -12,6 +12,7 @@ urlpatterns = [
     path("auth/verify-otp/", views.VerifyEmailOTPAPIView.as_view()),
     path("auth/signup/", views.SignupAPIView.as_view(), name="signup"),
     path("auth/login/", views.LoginAPIView.as_view(), name="login"),
+    path("auth/seo-login/", views.SEOLoginAPIView.as_view(), name="seo-login"),
     path("auth/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
 
     # path("auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
@@ -245,6 +246,10 @@ path(
     path("seo/page/", views.SEOPageMetaAPIView.as_view()),
     path("seo/course/<int:course_id>/", views.SEOCourseMetaAPIView.as_view()),
     path("seo/job/<int:job_id>/", views.SEOJobMetaAPIView.as_view()),
+    path("admin/seo/pages/", views.SEOPageMetaAdminListCreateAPIView.as_view()),
+    path("admin/seo/pages/<int:pk>/", views.SEOPageMetaAdminDetailAPIView.as_view()),
+    path("admin/seo/courses/<int:course_id>/", views.SEOCourseMetaAdminAPIView.as_view()),
+    path("admin/seo/jobs/<int:job_id>/", views.SEOJobMetaAdminAPIView.as_view()),
 
 
   

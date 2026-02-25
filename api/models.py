@@ -70,12 +70,11 @@ class CustomUserManager(BaseUserManager):
     def create_superuser(self, email, password=None, **extra_fields):
         role = extra_fields.get("role")
 
-        if role not in ["admin", "student"]:
-            raise ValueError("Role must be either 'admin' or 'student'")
+        if role not in ["admin", "seo"]:
+            raise ValueError("Role must be either 'admin' or 'seo'")
 
-        if role == "admin":
-            extra_fields.setdefault("is_staff", True)
-            extra_fields.setdefault("is_superuser", True)
+        extra_fields.setdefault("is_staff", True)
+        extra_fields.setdefault("is_superuser", True)
 
         return self.create_user(email, password, **extra_fields)
 
@@ -85,7 +84,12 @@ class CustomUserManager(BaseUserManager):
 # =====================================================
 
 class CustomUser(AbstractBaseUser, PermissionsMixin):
-    ROLE_CHOICES = (('admin', 'Admin'), ('student', 'Student'),('coordinator', 'Coordinator'))
+    ROLE_CHOICES = (
+        ('admin', 'Admin'),
+        ('student', 'Student'),
+        ('coordinator', 'Coordinator'),
+        ('seo', 'SEO Manager'),   # ✅ New Role Added
+    )
 
     email = models.EmailField(unique=True)
     role = models.CharField(max_length=20, choices=ROLE_CHOICES)
@@ -118,6 +122,20 @@ class AdminProfile(models.Model):
     def __str__(self):
         return f"AdminProfile → {self.full_name}"
 
+
+
+class SEOProfile(models.Model):
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="seo_profile",
+    )
+    full_name = models.CharField(max_length=100, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        name = self.full_name or self.user.email
+        return f"SEOProfile -> {name}"
 
 class StudentProfile(models.Model):
     GENDER_CHOICES = (
@@ -867,6 +885,7 @@ class CoordinatorPayout(models.Model):
 
     def __str__(self):
         return f"{self.coordinator.full_name} → ₹{self.total_amount} ({self.status})"
+
 
 
 
