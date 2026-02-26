@@ -142,19 +142,12 @@ class StudentProfile(models.Model):
         ("male", "Male"),
         ("female", "Female"),
     )
-    BATCH_CHOICES = [
-        ("2024", "2024"),
-        ("2025", "2025"),
-        ("2026", "2026"),
-        ("2027", "2027"),
-        ("2028", "2028"),
-        ("2029", "2029"),
-    ]
+    BATCH_CHOICES = [(str(year), str(year)) for year in range(2000, 2051)]
 
     batch = models.CharField(
     max_length=4,
     choices=BATCH_CHOICES,
-    default="2024"   # temporary default
+    default="2024"
     )
 
 
@@ -826,6 +819,42 @@ class JobSEOMeta(models.Model):
     def __str__(self):
         return f"SEO Job: {self.job.name}"
     
+
+class SEOChangeBackup(models.Model):
+    ENTITY_CHOICES = (
+        ("page", "Page"),
+        ("course", "Course"),
+        ("job", "Job"),
+    )
+    ACTION_CHOICES = (
+        ("create", "Create"),
+        ("update", "Update"),
+        ("delete", "Delete"),
+    )
+
+    entity_type = models.CharField(max_length=20, choices=ENTITY_CHOICES)
+    action = models.CharField(max_length=20, choices=ACTION_CHOICES)
+    entity_id = models.CharField(max_length=50, blank=True)
+    object_id = models.IntegerField(null=True, blank=True)
+    object_label = models.CharField(max_length=255, blank=True)
+    changed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="seo_change_backups",
+    )
+    changed_fields = models.JSONField(default=list, blank=True)
+    before_data = models.JSONField(default=dict, blank=True)
+    after_data = models.JSONField(default=dict, blank=True)
+    changed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-changed_at"]
+
+    def __str__(self):
+        return f"{self.entity_type} {self.action} ({self.entity_id or self.object_id})"
+
 
 class CoordinatorContact(models.Model):
     coordinator = models.ForeignKey(

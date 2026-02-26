@@ -251,6 +251,7 @@ path(
     path("admin/seo/pages/<int:pk>/", views.SEOPageMetaAdminDetailAPIView.as_view()),
     path("admin/seo/courses/<int:course_id>/", views.SEOCourseMetaAdminAPIView.as_view()),
     path("admin/seo/jobs/<int:job_id>/", views.SEOJobMetaAdminAPIView.as_view()),
+    path("admin/seo/backups/", views.SEOBackupListAPIView.as_view()),
 
 
   

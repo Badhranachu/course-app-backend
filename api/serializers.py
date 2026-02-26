@@ -20,7 +20,10 @@ class UserSignupSerializer(serializers.ModelSerializer):
     gender = serializers.ChoiceField(choices=[("male", "Male"), ("female", "Female")])
     phone = serializers.CharField(write_only=True)
     college_name = serializers.CharField(write_only=True)
-    batch = serializers.CharField(write_only=True)
+    batch = serializers.ChoiceField(
+        choices=StudentProfile.BATCH_CHOICES,
+        write_only=True
+    )
 
     class Meta:
         model = CustomUser
@@ -503,7 +506,7 @@ class CoordinatorContactSerializer(serializers.ModelSerializer):
         fields = ["id", "name", "email", "phone", "created_at"]
 
 
-from .models import CourseSEOMeta, JobSEOMeta, SEOPageMeta
+from .models import CourseSEOMeta, JobSEOMeta, SEOPageMeta, SEOChangeBackup
 
 
 class SEOPageMetaSerializer(serializers.ModelSerializer):
@@ -570,6 +573,25 @@ class JobSEOMetaSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
 
+
+class SEOChangeBackupSerializer(serializers.ModelSerializer):
+    changed_by_email = serializers.EmailField(source="changed_by.email", read_only=True)
+
+    class Meta:
+        model = SEOChangeBackup
+        fields = [
+            "id",
+            "entity_type",
+            "action",
+            "entity_id",
+            "object_id",
+            "object_label",
+            "changed_by_email",
+            "changed_fields",
+            "before_data",
+            "after_data",
+            "changed_at",
+        ]
 
 
 

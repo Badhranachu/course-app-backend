@@ -1,5 +1,6 @@
 # backend/api/views.py
 
+import logging
 from rest_framework import generics, status, permissions
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
@@ -21,13 +22,14 @@ from .models import (
     CustomUser, Course, Video, Enrollment,
     CourseModuleItem, Test,
     StudentTest, StudentAnswer, Question,
-    SEOPageMeta
+    SEOPageMeta, SEOChangeBackup
 )
 from .serializers import (
     UserSerializer, UserSignupSerializer, CourseSerializer,
     CourseListSerializer, VideoSerializer, EnrollmentSerializer,
     CourseModuleSerializer, TestDetailSerializer,
-    SEOPageMetaSerializer, CourseSEOMetaSerializer, JobSEOMetaSerializer
+    SEOPageMetaSerializer, CourseSEOMetaSerializer, JobSEOMetaSerializer,
+    SEOChangeBackupSerializer
 )
 
 # ------------------------------------------------------------
@@ -3577,6 +3579,70 @@ def _build_seo_payload(base_title="", base_description="", image_url="", overrid
     }
 
 
+logger = logging.getLogger(__name__)
+
+
+def _seo_snapshot(instance):
+    if instance is None:
+        return {}
+
+    payload = {
+        "id": instance.id,
+        "meta_title": instance.meta_title,
+        "meta_description": instance.meta_description,
+        "meta_keywords": instance.meta_keywords,
+        "og_title": instance.og_title,
+        "og_description": instance.og_description,
+        "og_image": instance.og_image,
+        "canonical_url": instance.canonical_url,
+        "robots": instance.robots,
+        "is_active": instance.is_active,
+        "updated_at": instance.updated_at.isoformat() if instance.updated_at else None,
+    }
+
+    if isinstance(instance, SEOPageMeta):
+        payload["route_key"] = instance.route_key
+    elif hasattr(instance, "course_id"):
+        payload["course_id"] = instance.course_id
+    elif hasattr(instance, "job_id"):
+        payload["job_id"] = instance.job_id
+
+    return payload
+
+
+def _changed_seo_fields(before_data, after_data):
+    keys = set((before_data or {}).keys()) | set((after_data or {}).keys())
+    return sorted([key for key in keys if (before_data or {}).get(key) != (after_data or {}).get(key)])
+
+
+def _log_seo_backup(
+    *,
+    entity_type,
+    action,
+    changed_by,
+    entity_id="",
+    object_id=None,
+    object_label="",
+    before_data=None,
+    after_data=None,
+):
+    # Never break SEO save APIs if backup table/migration is missing.
+    try:
+        SEOChangeBackup.objects.create(
+            entity_type=entity_type,
+            action=action,
+            changed_by=changed_by if getattr(changed_by, "is_authenticated", False) else None,
+            entity_id=str(entity_id or ""),
+            object_id=object_id,
+            object_label=object_label or "",
+            changed_fields=_changed_seo_fields(before_data, after_data),
+            before_data=before_data or {},
+            after_data=after_data or {},
+        )
+    except Exception as exc:
+        logger.warning("SEO backup logging failed: %s", exc)
+
+
 class SEOPageMetaAPIView(APIView):
     permission_classes = [permissions.AllowAny]
 
@@ -3660,7 +3726,18 @@ class SEOPageMetaAdminListCreateAPIView(APIView):
     def post(self, request):
         serializer = SEOPageMetaSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        serializer.save()
+        item = serializer.save()
+        payload = _seo_snapshot(item)
+        _log_seo_backup(
+            entity_type="page",
+            action="create",
+            changed_by=request.user,
+            entity_id=item.route_key,
+            object_id=item.id,
+            object_label=item.meta_title or item.route_key,
+            before_data={},
+            after_data=payload,
+        )
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
@@ -3673,13 +3750,35 @@ class SEOPageMetaAdminDetailAPIView(APIView):
 
     def patch(self, request, pk):
         item = get_object_or_404(SEOPageMeta, pk=pk)
+        before_data = _seo_snapshot(item)
         serializer = SEOPageMetaSerializer(item, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
-        serializer.save()
+        updated_item = serializer.save()
+        _log_seo_backup(
+            entity_type="page",
+            action="update",
+            changed_by=request.user,
+            entity_id=updated_item.route_key,
+            object_id=updated_item.id,
+            object_label=updated_item.meta_title or updated_item.route_key,
+            before_data=before_data,
+            after_data=_seo_snapshot(updated_item),
+        )
         return Response(serializer.data)
 
     def delete(self, request, pk):
         item = get_object_or_404(SEOPageMeta, pk=pk)
+        before_data = _seo_snapshot(item)
+        _log_seo_backup(
+            entity_type="page",
+            action="delete",
+            changed_by=request.user,
+            entity_id=item.route_key,
+            object_id=item.id,
+            object_label=item.meta_title or item.route_key,
+            before_data=before_data,
+            after_data={},
+        )
         item.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -3701,6 +3800,7 @@ class SEOCourseMetaAdminAPIView(APIView):
         course = get_object_or_404(Course, id=course_id)
         data = request.data.copy()
         meta = getattr(course, "seo_meta", None)
+        before_data = _seo_snapshot(meta) if meta else {}
 
         if meta:
             serializer = CourseSEOMetaSerializer(meta, data=data, partial=True)
@@ -3710,11 +3810,44 @@ class SEOCourseMetaAdminAPIView(APIView):
         serializer.is_valid(raise_exception=True)
 
         if meta:
-            serializer.save()
+            saved_meta = serializer.save()
+            action = "update"
         else:
-            serializer.save(course=course)
+            saved_meta = serializer.save(course=course)
+            action = "create"
+
+        _log_seo_backup(
+            entity_type="course",
+            action=action,
+            changed_by=request.user,
+            entity_id=course.id,
+            object_id=saved_meta.id,
+            object_label=course.title,
+            before_data=before_data,
+            after_data=_seo_snapshot(saved_meta),
+        )
 
         return Response(serializer.data)
+
+    def delete(self, request, course_id):
+        course = get_object_or_404(Course, id=course_id)
+        meta = getattr(course, "seo_meta", None)
+        if not meta:
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        before_data = _seo_snapshot(meta)
+        _log_seo_backup(
+            entity_type="course",
+            action="delete",
+            changed_by=request.user,
+            entity_id=course.id,
+            object_id=meta.id,
+            object_label=course.title,
+            before_data=before_data,
+            after_data={},
+        )
+        meta.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class SEOJobMetaAdminAPIView(APIView):
@@ -3734,6 +3867,7 @@ class SEOJobMetaAdminAPIView(APIView):
         job = get_object_or_404(Job, id=job_id)
         data = request.data.copy()
         meta = getattr(job, "seo_meta", None)
+        before_data = _seo_snapshot(meta) if meta else {}
 
         if meta:
             serializer = JobSEOMetaSerializer(meta, data=data, partial=True)
@@ -3743,9 +3877,53 @@ class SEOJobMetaAdminAPIView(APIView):
         serializer.is_valid(raise_exception=True)
 
         if meta:
-            serializer.save()
+            saved_meta = serializer.save()
+            action = "update"
         else:
-            serializer.save(job=job)
+            saved_meta = serializer.save(job=job)
+            action = "create"
+
+        _log_seo_backup(
+            entity_type="job",
+            action=action,
+            changed_by=request.user,
+            entity_id=job.id,
+            object_id=saved_meta.id,
+            object_label=job.name,
+            before_data=before_data,
+            after_data=_seo_snapshot(saved_meta),
+        )
 
         return Response(serializer.data)
+
+    def delete(self, request, job_id):
+        job = get_object_or_404(Job, id=job_id)
+        meta = getattr(job, "seo_meta", None)
+        if not meta:
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        before_data = _seo_snapshot(meta)
+        _log_seo_backup(
+            entity_type="job",
+            action="delete",
+            changed_by=request.user,
+            entity_id=job.id,
+            object_id=meta.id,
+            object_label=job.name,
+            before_data=before_data,
+            after_data={},
+        )
+        meta.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class SEOBackupListAPIView(APIView):
+    permission_classes = [IsAuthenticated, IsSEOUserRole]
+
+    def get(self, request):
+        entity_type = request.query_params.get("entity_type")
+        qs = SEOChangeBackup.objects.all()
+        if entity_type in {"page", "course", "job"}:
+            qs = qs.filter(entity_type=entity_type)
+        return Response(SEOChangeBackupSerializer(qs[:200], many=True).data)
 
