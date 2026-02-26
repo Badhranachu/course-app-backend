@@ -12,6 +12,7 @@ from .models import (
     SupportTicket,
     Video,
     Contactus,
+    ProductEnquiry,
 )
 
 
@@ -168,6 +169,22 @@ class ContactusAdmin(admin.ModelAdmin):
         super().save_model(request, obj, form, change)
 
 
+@admin.register(ProductEnquiry)
+class ProductEnquiryAdmin(admin.ModelAdmin):
+    list_display = (
+        "full_name",
+        "phone",
+        "enquiry_type",
+        "section_title",
+        "product_name",
+        "status",
+        "created_at",
+    )
+    list_filter = ("enquiry_type", "status", "created_at")
+    search_fields = ("full_name", "phone", "email", "section_title", "product_name")
+    ordering = ("-created_at",)
+
+
 @admin.register(SEOPageMeta)
 class SEOPageMetaAdmin(admin.ModelAdmin):
     list_display = ("route_key", "meta_title", "is_active", "updated_at")
@@ -242,6 +259,7 @@ EXCLUDE_MODELS = {
     CourseModuleItem,
     SupportTicket,
     Contactus,
+    ProductEnquiry,
     CoordinatorPayout,
     SEOPageMeta,
     CourseSEOMeta,

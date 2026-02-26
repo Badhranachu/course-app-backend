@@ -2453,8 +2453,9 @@ class AdminVideoUploadZipAPIView(APIView):
         )
 
 
-from api.serializers import ContactUsSerializer
-from .models import Contactus
+from urllib.parse import quote
+from api.serializers import ContactUsSerializer, ProductEnquirySerializer
+from .models import Contactus, ProductEnquiry
 class ContactUsCreateAPIView(APIView):
     permission_classes = [permissions.AllowAny]
 
@@ -2512,11 +2513,116 @@ Submitted At: {contact.created_at}
             )
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
 
 
+class ProductEnquiryCreateAPIView(APIView):
+    permission_classes = [permissions.AllowAny]
 
+    def _build_whatsapp_url(self, enquiry):
+        selected_items = enquiry.selected_items or []
+        selected_items_text = ", ".join(selected_items) if selected_items else "None"
+        target_label = enquiry.product_name if enquiry.enquiry_type == "product" else enquiry.section_title
 
+        whatsapp_number = "".join(
+            ch for ch in str(getattr(settings, "PRODUCT_ENQUIRY_WHATSAPP_NUMBER", "") or "") if ch.isdigit()
+        )
+        if not whatsapp_number:
+            return ""
+
+        wa_lines = [
+            f"Hello Nexston,",
+            "",
+            f"I would like to enquire about *{target_label}*.",
+            "",
+            "My Details:",
+            f"- Name: {enquiry.full_name}",
+            f"- Phone: {enquiry.phone}",
+            f"- Email: {enquiry.email or 'Not provided'}",
+            "",
+            "Interested In:",
+            # f"- Section: {enquiry.section_title or 'N/A'}",
+            f"- Services: {selected_items_text}",
+            "",
+            "Kindly share further details, pricing, and next steps.",
+        ]
+        if enquiry.custom_message:
+            wa_lines.extend(["", f"Message: {enquiry.custom_message}"])
+
+        return f"https://wa.me/{whatsapp_number}?text={quote(chr(10).join(wa_lines))}"
+
+    def post(self, request):
+        serializer = ProductEnquirySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        email = (serializer.validated_data.get("email") or "").strip().lower()
+        phone = (serializer.validated_data.get("phone") or "").strip()
+
+        if email and phone:
+            existing_enquiry = ProductEnquiry.objects.filter(
+                email__iexact=email,
+                phone=phone,
+            ).order_by("-id").first()
+            if existing_enquiry:
+                return Response(
+                    {
+                        "message": "We already received your enquiry. Our team will contact you shortly.",
+                        "whatsapp_url": self._build_whatsapp_url(existing_enquiry),
+                        "id": existing_enquiry.id,
+                    },
+                    status=status.HTTP_200_OK,
+                )
+
+        enquiry = serializer.save()
+
+        selected_items = enquiry.selected_items or []
+        selected_items_text = ", ".join(selected_items) if selected_items else "None"
+        target_label = enquiry.product_name if enquiry.enquiry_type == "product" else enquiry.section_title
+        subject = f"New Product Enquiry - {target_label}"
+
+        email_lines = [
+            "New public enquiry submitted.",
+            "",
+            f"Type: {enquiry.enquiry_type}",
+            f"Section: {enquiry.section_title or 'N/A'}",
+            f"Product: {enquiry.product_name or 'N/A'}",
+            f"Selected Items: {selected_items_text}",
+            "",
+            "Contact Details:",
+            f"Name: {enquiry.full_name}",
+            f"Phone: {enquiry.phone}",
+            f"Email: {enquiry.email or 'Not provided'}",
+            "",
+            "Custom Message:",
+            enquiry.custom_message or "No custom message.",
+            "",
+            f"Created At: {enquiry.created_at}",
+        ]
+
+        admin_emails = list(
+            CustomUser.objects.filter(
+                role="admin",
+                is_active=True,
+                admin_profile__isnull=False,
+            ).values_list("email", flat=True)
+        )
+
+        if admin_emails:
+            send_mail(
+                subject=subject,
+                message="\n".join(email_lines),
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=admin_emails,
+                fail_silently=True,
+            )
+
+        return Response(
+            {
+                "message": "Enquiry submitted successfully.",
+                "whatsapp_url": self._build_whatsapp_url(enquiry),
+                "id": enquiry.id,
+            },
+            status=status.HTTP_201_CREATED,
+        )
 from api.serializers import SendOTPSerializer,VerifyOTPResetPasswordSerializer
 from api.models import PasswordResetOTP
 from rest_framework.permissions import AllowAny
@@ -3642,3 +3748,4 @@ class SEOJobMetaAdminAPIView(APIView):
             serializer.save(job=job)
 
         return Response(serializer.data)
+

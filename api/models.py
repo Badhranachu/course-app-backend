@@ -702,6 +702,37 @@ class Contactus(models.Model):
     def __str__(self):
         return f"{self.full_name} - {self.email}"
 
+
+class ProductEnquiry(models.Model):
+    ENQUIRY_TYPE_CHOICES = (
+        ("product", "Product"),
+        ("section", "Section"),
+    )
+
+    STATUS_CHOICES = (
+        ("pending", "Pending"),
+        ("contacted", "Contacted"),
+    )
+
+    enquiry_type = models.CharField(max_length=20, choices=ENQUIRY_TYPE_CHOICES)
+    section_key = models.CharField(max_length=50, blank=True)
+    section_title = models.CharField(max_length=200, blank=True)
+    product_id = models.CharField(max_length=120, blank=True)
+    product_name = models.CharField(max_length=200, blank=True)
+    selected_items = models.JSONField(default=list, blank=True)
+
+    full_name = models.CharField(max_length=150)
+    phone = models.CharField(max_length=20)
+    email = models.EmailField(blank=True)
+    custom_message = models.TextField(blank=True)
+
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        target = self.product_name or self.section_title or "General"
+        return f"{self.full_name} -> {target} ({self.status})"
+
 from datetime import timedelta
 class PasswordResetOTP(models.Model):
     email = models.EmailField()

@@ -216,6 +216,7 @@ path(
     path("admin-videos/create/", views.AdminVideoCreateView.as_view()),
     path("admin-videos/upload-zip/", views.AdminVideoUploadZipAPIView.as_view()),
     path("contactus/",views.ContactUsCreateAPIView.as_view()),
+    path("products/enquiry/", views.ProductEnquiryCreateAPIView.as_view()),
 
     path("forgot-password/", views.ForgotPasswordAPIView.as_view()),
     path("forgot-password/resend/", views.ResendForgotPasswordOTPAPIView.as_view()),

@@ -102,6 +102,63 @@ class ContactUsSerializer(serializers.ModelSerializer):
         read_only_fields = ["status", "created_at"]
 
 
+from .models import ProductEnquiry
+
+
+class ProductEnquirySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProductEnquiry
+        fields = [
+            "id",
+            "enquiry_type",
+            "section_key",
+            "section_title",
+            "product_id",
+            "product_name",
+            "selected_items",
+            "full_name",
+            "phone",
+            "email",
+            "custom_message",
+            "status",
+            "created_at",
+        ]
+        read_only_fields = ["status", "created_at"]
+
+    def validate_selected_items(self, value):
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise serializers.ValidationError("selected_items must be a list.")
+        return [str(item).strip() for item in value if str(item).strip()]
+
+    def validate(self, attrs):
+        enquiry_type = attrs.get("enquiry_type")
+        product_name = (attrs.get("product_name") or "").strip()
+        section_title = (attrs.get("section_title") or "").strip()
+
+        if enquiry_type == "product" and not product_name:
+            raise serializers.ValidationError({"product_name": "Product name is required for product enquiry."})
+        if enquiry_type == "section" and not section_title:
+            raise serializers.ValidationError({"section_title": "Section title is required for section enquiry."})
+
+        attrs["full_name"] = (attrs.get("full_name") or "").strip()
+        attrs["phone"] = (attrs.get("phone") or "").strip()
+        attrs["email"] = (attrs.get("email") or "").strip().lower()
+        attrs["custom_message"] = (attrs.get("custom_message") or "").strip()
+        attrs["product_name"] = product_name
+        attrs["section_title"] = section_title
+        attrs["section_key"] = (attrs.get("section_key") or "").strip()
+        attrs["product_id"] = (attrs.get("product_id") or "").strip()
+
+        if not attrs["full_name"]:
+            raise serializers.ValidationError({"full_name": "Full name is required."})
+        if not attrs["phone"]:
+            raise serializers.ValidationError({"phone": "Phone number is required."})
+
+        return attrs
+
+
 
 class SendOTPSerializer(serializers.Serializer):
     email = serializers.EmailField()
