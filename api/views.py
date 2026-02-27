@@ -432,40 +432,41 @@ class CourseModulesAPIView(APIView):
         user = request.user
         course = get_object_or_404(Course, id=course_id)
 
-        # ✅ Correct enrollment check
-        if not Enrollment.objects.filter(
+        is_enrolled = Enrollment.objects.filter(
             user=user,
             course=course
-        ).exists():
-            return Response(
-                {"error": "You are not enrolled in this course"},
-                status=403
-            )
-
+        ).exists()
 
         modules = CourseModuleItem.objects.filter(
             course=course
         ).order_by("order")
 
-        # ✅ Unlock first module
-        first = modules.first()
-        if first:
-            StudentModuleUnlock.objects.get_or_create(
-                user=user,
-                module=first,
-                defaults={"is_unlocked": True}
-            )
+        # Keep unlock progression only for enrolled students
+        if is_enrolled:
+            first = modules.first()
+            if first:
+                StudentModuleUnlock.objects.get_or_create(
+                    user=user,
+                    module=first,
+                    defaults={"is_unlocked": True}
+                )
 
-        return Response([
-            CourseModuleSerializer(
+        response = []
+        for module in modules:
+            item = CourseModuleSerializer(
                 module,
                 context={
                     "request": request,
                     "user": user
                 }
             ).data
-            for module in modules
-        ])
+
+            if not is_enrolled:
+                item["is_unlocked"] = False
+
+            response.append(item)
+
+        return Response(response)
 
 
 
@@ -1700,7 +1701,7 @@ class CourseModuleProgressAPIView(APIView):
                 "module_id": module.id,
                 "order": module.order,
                 "item_type": module.item_type,
-                "description": module.description,
+                "description": "",
                 "is_unlocked": unlocked,
                 "is_completed": completed,
             }
@@ -1709,13 +1710,15 @@ class CourseModuleProgressAPIView(APIView):
                 item_data.update({
                     "video_id": module.video.id,
                     "title": module.video.title,
+                    "description": module.video.description or "",
                     "duration": module.video.duration
                 })
 
             if module.item_type == "test" and module.test:
                 item_data.update({
                     "test_id": module.test.id,
-                    "title": module.test.name
+                    "title": module.test.name,
+                    "description": module.test.description or ""
                 })
 
             response.append(item_data)

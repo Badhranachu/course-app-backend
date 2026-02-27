@@ -13,7 +13,7 @@ urlpatterns = [
     path("auth/signup/", views.SignupAPIView.as_view(), name="signup"),
     path("auth/login/", views.LoginAPIView.as_view(), name="login"),
     path("auth/seo-login/", views.SEOLoginAPIView.as_view(), name="seo-login"),
-    path("panel/login/", views.AdminLoginAPIView.as_view(), name="admin-login"),
+    path("admin/login/", views.AdminLoginAPIView.as_view(), name="admin-login"),
     path("auth/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
 
     # path("auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
