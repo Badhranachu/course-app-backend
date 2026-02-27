@@ -316,6 +316,9 @@ class Enrollment(models.Model):
     class Meta:
         unique_together = ["user", "course"]
 
+    def __str__(self):
+        return f"{self.user.email} -> {self.course.title}"
+
 
 
 class PaymentTransaction(models.Model):
@@ -344,6 +347,10 @@ class PaymentTransaction(models.Model):
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        payment_id = self.razorpay_payment_id or "pending"
+        return f"{self.user.email} -> {self.course.title} ({payment_id})"
 
 # =====================================================
 # TESTS
@@ -420,7 +427,14 @@ class CourseModuleItem(models.Model):
             raise ValidationError("Test must be set")
 
     def __str__(self):
-        return f"{self.course.title} → {self.item_type} #{self.order}"
+        module_name = ""
+        if self.item_type == "video" and self.video:
+            module_name = self.video.title
+        elif self.item_type == "test" and self.test:
+            module_name = self.test.name
+        else:
+            module_name = "Unnamed Module"
+        return f"{self.course.title} | {self.item_type} | Order {self.order} | {module_name}"
 
 # =====================================================
 # STUDENT TEST + ANSWERS
@@ -518,6 +532,9 @@ class StudentVideoProgress(models.Model):
     class Meta:
         unique_together = ("user", "video")
 
+    def __str__(self):
+        return f"{self.user.email} -> {self.video.title} ({self.watched_seconds}s)"
+
 
 
 class StudentModuleUnlock(models.Model):
@@ -542,6 +559,10 @@ class EmailOTP(models.Model):
 
     def is_expired(self):
         return timezone.now() > self.created_at + timezone.timedelta(minutes=5)
+
+    def __str__(self):
+        status = "verified" if self.is_verified else "pending"
+        return f"{self.email} ({status})"
     
 
 
@@ -945,6 +966,7 @@ class CoordinatorPayout(models.Model):
 
     def __str__(self):
         return f"{self.coordinator.full_name} → ₹{self.total_amount} ({self.status})"
+
 
 
 

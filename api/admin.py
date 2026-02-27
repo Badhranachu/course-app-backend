@@ -104,9 +104,21 @@ class CourseModuleItemAdminForm(forms.ModelForm):
 @admin.register(CourseModuleItem)
 class CourseModuleItemAdmin(admin.ModelAdmin):
     form = CourseModuleItemAdminForm
-    list_display = ("course", "item_type", "order")
+    list_display = ("module_label", "course", "item_type", "order", "module_name")
     list_filter = ("course", "item_type")
     ordering = ("course", "order")
+
+    @admin.display(description="Module")
+    def module_label(self, obj):
+        return str(obj)
+
+    @admin.display(description="Module Name")
+    def module_name(self, obj):
+        if obj.item_type == "video" and obj.video:
+            return obj.video.title
+        if obj.item_type == "test" and obj.test:
+            return obj.test.name
+        return "-"
 
 
 # =====================================================
