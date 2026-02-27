@@ -244,6 +244,7 @@ class CourseModuleSerializer(serializers.ModelSerializer):
     description = serializers.SerializerMethodField()
     thumbnail = serializers.SerializerMethodField()
     item_id = serializers.SerializerMethodField()
+    video_course_id = serializers.SerializerMethodField()
     has_attachment = serializers.SerializerMethodField()
 
 
@@ -259,6 +260,7 @@ class CourseModuleSerializer(serializers.ModelSerializer):
             "description",
             "thumbnail",
             "item_id",
+            "video_course_id",
             "order",
             "has_attachment",
             "is_unlocked",   # Now VALID
@@ -311,6 +313,11 @@ class CourseModuleSerializer(serializers.ModelSerializer):
             return obj.video.id
         if obj.item_type == "test" and obj.test:
             return obj.test.id
+        return None
+
+    def get_video_course_id(self, obj):
+        if obj.item_type == "video" and obj.video:
+            return obj.video.course_id
         return None
 
     # ---------------------------------

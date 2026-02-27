@@ -585,7 +585,12 @@ class StreamVideoAPIView(APIView):
     permission_classes = []       # ❌ no permission
 
     def get(self, request, course_id, video_id):
-        video = get_object_or_404(Video, id=video_id, course_id=course_id)
+        course = get_object_or_404(Course, id=course_id)
+        if not Enrollment.objects.filter(user=request.user, course=course).exists():
+            return Response({"error": "Not enrolled"}, status=403)
+        video = resolve_video_for_requested_course(course, video_id)
+        if not video:
+            return Response({"error": "Video not found in this course"}, status=404)
 
         file = video.video_file.open("rb")
 
@@ -1065,11 +1070,18 @@ class CourseVideosAPIView(APIView):
 
         # 🔹 CASE 1: video_id provided → single video
         if video_id is not None:
-            video = get_object_or_404(
-                Video,
-                id=video_id,
-                course=course
-            )
+            video = Video.objects.filter(id=video_id, course=course).first()
+            if not video:
+                video = Video.objects.filter(id=video_id).first()
+                if not video:
+                    return Response({"error": "Video not found"}, status=404)
+                linked = CourseModuleItem.objects.filter(
+                    course=course,
+                    video=video,
+                    item_type="video"
+                ).exists()
+                if not linked:
+                    return Response({"error": "Video not found in this course"}, status=404)
             serializer = VideoSerializer(
                 video,
                 context={"request": request}
@@ -1428,7 +1440,13 @@ class UpdateVideoDurationAPIView(APIView):
         if duration <= 0:
             return Response({"error": "Invalid duration"}, status=400)
 
-        video = get_object_or_404(Video, id=video_id, course_id=course_id)
+        course = get_object_or_404(Course, id=course_id)
+        if not Enrollment.objects.filter(user=request.user, course=course).exists():
+            return Response({"error": "Not enrolled"}, status=403)
+
+        video = resolve_video_for_requested_course(course, video_id)
+        if not video:
+            return Response({"error": "Video not found in this course"}, status=404)
 
         # Save only once
         if not video.duration or video.duration == 0:
@@ -1446,6 +1464,27 @@ def ensure_video_duration(video):
     return video.duration or 0
 
 
+def resolve_video_for_requested_course(course, video_id):
+    """
+    Resolve by direct course-video relation first.
+    Fallback: allow if the video is linked inside requested course modules.
+    """
+    video = Video.objects.filter(id=video_id, course=course).first()
+    if video:
+        return video
+
+    video = Video.objects.filter(id=video_id).first()
+    if not video:
+        return None
+
+    linked = CourseModuleItem.objects.filter(
+        course=course,
+        video=video,
+        item_type="video"
+    ).exists()
+    return video if linked else None
+
+
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -1459,8 +1498,9 @@ class SaveVideoDurationAPIView(APIView):
         # ✅ Ensure course exists
         course = get_object_or_404(Course, id=course_id)
 
-        # ✅ Ensure video belongs to the course
-        video = get_object_or_404(Video, id=video_id, course=course)
+        video = resolve_video_for_requested_course(course, video_id)
+        if not video:
+            return Response({"error": "Video not found in this course"}, status=404)
 
         # ✅ Save duration only once
         if video.duration:
@@ -1518,7 +1558,9 @@ class UpdateVideoProgressAPIView(APIView):
         ).exists():
             return Response({"error": "Not enrolled"}, status=403)
 
-        video = get_object_or_404(Video, id=video_id, course=course)
+        video = resolve_video_for_requested_course(course, video_id)
+        if not video:
+            return Response({"error": "Video not found in this course"}, status=404)
 
         # ✅ ENSURE DURATION EVEN IN GET
         duration = ensure_video_duration(video)
@@ -1567,7 +1609,9 @@ class UpdateVideoProgressAPIView(APIView):
             return Response({"error": "Not enrolled"}, status=403)
 
         # 🎬 Video from URL (NOT request body)
-        video = get_object_or_404(Video, id=video_id, course=course)
+        video = resolve_video_for_requested_course(course, video_id)
+        if not video:
+            return Response({"error": "Video not found in this course"}, status=404)
 
         module = get_object_or_404(
             CourseModuleItem,
@@ -1709,6 +1753,7 @@ class CourseModuleProgressAPIView(APIView):
             if module.item_type == "video" and module.video:
                 item_data.update({
                     "video_id": module.video.id,
+                    "video_course_id": module.video.course_id,
                     "title": module.video.title,
                     "description": module.video.description or "",
                     "duration": module.video.duration
@@ -2339,6 +2384,9 @@ import zipfile
 import tempfile
 import shutil
 import logging
+import subprocess
+import time
+import threading
 
 from django.conf import settings
 from django.http import JsonResponse
@@ -2353,36 +2401,68 @@ logger = logging.getLogger(__name__)
 
 
 class AdminVideoUploadZipAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsAdminUserRole]
+    _whisper_model = None
+    _whisper_device = None
+    _ffmpeg_nvenc_available = None
+    _jobs = {}
+    _jobs_lock = threading.Lock()
 
-    def post(self, request):
-        logger.info("📦 Upload request received")
+    @staticmethod
+    def _seconds_to_vtt_time(seconds):
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        secs = float(seconds % 60)
+        return f"{hours:02}:{minutes:02}:{secs:06.3f}"
 
-        zip_file = request.FILES.get("file")
-        course_id = request.data.get("course_id")
-        title = request.data.get("title", "Video")
+    @classmethod
+    def _get_whisper_model(cls):
+        if cls._whisper_model is not None:
+            return cls._whisper_model, cls._whisper_device
 
-        if not zip_file or not course_id:
-            return JsonResponse({"error": "Missing file or course_id"}, status=400)
+        import torch
+        import whisper
 
-        course = Course.objects.get(id=course_id)
+        model_name = getattr(settings, "WHISPER_MODEL", "base")
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        cls._whisper_model = whisper.load_model(model_name, device=device)
+        cls._whisper_device = device
+        return cls._whisper_model, cls._whisper_device
 
-        # --------------------------------------------------
-        # 1️⃣ Create DB record early
-        # --------------------------------------------------
-        video = Video.objects.create(
-            course=course,
-            title=title,
-            status="uploading"
-        )
+    @classmethod
+    def _has_ffmpeg_nvenc(cls):
+        if cls._ffmpeg_nvenc_available is not None:
+            return cls._ffmpeg_nvenc_available
+        try:
+            res = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-encoders"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            output = f"{res.stdout}\n{res.stderr}"
+            cls._ffmpeg_nvenc_available = "h264_nvenc" in output
+        except Exception:
+            cls._ffmpeg_nvenc_available = False
+        return cls._ffmpeg_nvenc_available
 
+    @classmethod
+    def _set_job(cls, job_id, **updates):
+        with cls._jobs_lock:
+            current = cls._jobs.get(job_id, {})
+            current.update(updates)
+            cls._jobs[job_id] = current
+            return current
 
-        lesson_key = f"lesson_{video.id}"
+    @classmethod
+    def _get_job(cls, job_id):
+        with cls._jobs_lock:
+            job = cls._jobs.get(job_id)
+            return dict(job) if job else None
 
-        # --------------------------------------------------
-        # 2️⃣ Upload ZIP FIRST to R2
-        # --------------------------------------------------
-        s3 = boto3.client(
+    @classmethod
+    def _build_s3_client(cls):
+        return boto3.client(
             "s3",
             endpoint_url=settings.AWS_S3_ENDPOINT_URL,
             aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
@@ -2393,118 +2473,257 @@ class AdminVideoUploadZipAPIView(APIView):
             ),
         )
 
+    @classmethod
+    def _run_pipeline(cls, *, job_id, video_id, course_id, lesson_key, input_path, temp_dir, language):
+        hls_root = os.path.join(temp_dir, "hls")
+        os.makedirs(hls_root, exist_ok=True)
+        base_r2_path = f"videos/course-{course_id}/{lesson_key}/hls"
 
+        try:
+            cls._set_job(job_id, phase="subtitle", subtitle_progress=1, message="Generating subtitles...")
+            subtitle_path = os.path.join(hls_root, "VideoProject.vtt")
+            subtitle_warning = None
 
-        zip_r2_key = f"videos/course-{course.id}/{lesson_key}/original.zip"
-
-        logger.info("☁️ Uploading ZIP to R2: %s", zip_r2_key)
-
-        s3.upload_fileobj(
-            zip_file,
-            settings.AWS_STORAGE_BUCKET_NAME,  # ✅ FIX
-            zip_r2_key,
-            ExtraArgs={"ContentType": "application/zip"},
-        )
-
-
-        # --------------------------------------------------
-        # 3️⃣ Download ZIP to TEMP
-        # --------------------------------------------------
-        temp_dir = tempfile.mkdtemp()
-        zip_path = os.path.join(temp_dir, "video.zip")
-
-        logger.info("⬇️ Downloading ZIP from R2")
-
-        s3.download_file(
-            settings.AWS_STORAGE_BUCKET_NAME,  # ✅ FIX
-            zip_r2_key,
-            zip_path
-        )
-
-
-        # --------------------------------------------------
-        # 4️⃣ Extract ZIP
-        # --------------------------------------------------
-        logger.info("📂 Extracting ZIP")
-
-        with zipfile.ZipFile(zip_path, "r") as zip_ref:
-            zip_ref.extractall(temp_dir)
-
-        # --------------------------------------------------
-        # 5️⃣ Find HLS root (master.m3u8)
-        # --------------------------------------------------
-        hls_root = None
-
-        for root, dirs, files in os.walk(temp_dir):
-            if "master.m3u8" in files:
-                hls_root = root
-                break
-
-        if not hls_root:
-            shutil.rmtree(temp_dir)
-            return JsonResponse({"error": "master.m3u8 not found"}, status=400)
-
-        logger.info("🎬 HLS root found: %s", hls_root)
-
-        # --------------------------------------------------
-        # 6️⃣ Upload extracted HLS folder to R2
-        # --------------------------------------------------
-        base_r2_path = f"videos/course-{course.id}/{lesson_key}/hls"
-
-        for root, dirs, files in os.walk(hls_root):
-            for file in files:
-                local_path = os.path.join(root, file)
-                relative_path = os.path.relpath(local_path, hls_root).replace("\\", "/")
-
-
-                r2_key = f"{base_r2_path}/{relative_path}"
-
-                content_type = (
-                    "application/vnd.apple.mpegurl"
-                    if file.endswith(".m3u8")
-                    else "video/MP2T"
+            try:
+                whisper_model, whisper_device = cls._get_whisper_model()
+                logger.info("[job:%s] Whisper device: %s", job_id, whisper_device)
+                transcript = whisper_model.transcribe(
+                    input_path,
+                    language=language,
+                    verbose=False,
+                    fp16=(whisper_device == "cuda"),
                 )
+                segments = transcript.get("segments", [])
+                total = max(len(segments), 1)
+                with open(subtitle_path, "w", encoding="utf-8") as vtt:
+                    vtt.write("WEBVTT\n\n")
+                    for idx, segment in enumerate(segments, start=1):
+                        start = cls._seconds_to_vtt_time(segment.get("start", 0))
+                        end = cls._seconds_to_vtt_time(segment.get("end", 0))
+                        text = (segment.get("text", "") or "").strip()
+                        if text:
+                            logger.info("subtitle_line start=%s end=%s text=%s", start, end, text)
+                            vtt.write(f"{start} --> {end}\n{text}\n\n")
+                        progress = int((idx / total) * 100)
+                        cls._set_job(job_id, subtitle_progress=progress)
+                        logger.info("[job:%s] subtitle_progress=%s", job_id, progress)
+            except Exception as subtitle_err:
+                logger.warning("[job:%s] Subtitle generation unavailable: %s", job_id, subtitle_err)
+                subtitle_warning = f"Subtitle generation unavailable: {subtitle_err}"
+                with open(subtitle_path, "w", encoding="utf-8") as vtt:
+                    vtt.write("WEBVTT\n\n")
+                cls._set_job(job_id, subtitle_progress=100)
 
-                logger.info("⬆️ Uploading: %s", r2_key)
+            cls._set_job(job_id, phase="hls", hls_progress=1, message="Converting to HLS...")
+            use_nvenc = cls._has_ffmpeg_nvenc()
+            logger.info("[job:%s] FFmpeg NVENC available: %s", job_id, use_nvenc)
+
+            ffmpeg_cmd = [
+                "ffmpeg", "-y",
+                "-i", input_path,
+                "-filter_complex",
+                "[0:v]split=3[v480src][v720src][v1080src];"
+                "[v480src]scale=854:480[v480];"
+                "[v720src]scale=1280:720[v720];"
+                "[v1080src]scale=1920:1080[v1080]",
+                "-map", "[v480]", "-map", "0:a?",
+                "-c:v:0", "h264_nvenc" if use_nvenc else "libx264", "-b:v:0", "1400k",
+                "-g", "90", "-keyint_min", "90", "-sc_threshold", "0",
+                "-force_key_frames", "expr:gte(t,n_forced*3)",
+                "-map", "[v720]", "-map", "0:a?",
+                "-c:v:1", "h264_nvenc" if use_nvenc else "libx264", "-b:v:1", "2800k",
+                "-g", "90", "-keyint_min", "90", "-sc_threshold", "0",
+                "-force_key_frames", "expr:gte(t,n_forced*3)",
+                "-map", "[v1080]", "-map", "0:a?",
+                "-c:v:2", "h264_nvenc" if use_nvenc else "libx264", "-b:v:2", "5000k",
+                "-g", "90", "-keyint_min", "90", "-sc_threshold", "0",
+                "-force_key_frames", "expr:gte(t,n_forced*3)",
+                "-c:a", "aac", "-b:a", "128k",
+                "-hls_time", "3",
+                "-hls_playlist_type", "vod",
+                "-hls_flags", "independent_segments",
+                "-hls_segment_filename", os.path.join(hls_root, "%v", "segment_%03d.ts"),
+                "-master_pl_name", "master.m3u8",
+                "-var_stream_map",
+                "v:0,a:0,name:480p v:1,a:1,name:720p v:2,a:2,name:1080p",
+                os.path.join(hls_root, "%v", "index.m3u8"),
+            ]
+
+            ffmpeg_result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
+            if ffmpeg_result.returncode != 0 and use_nvenc:
+                logger.warning("[job:%s] NVENC failed; retrying with libx264", job_id)
+                ffmpeg_cmd_cpu = ["libx264" if token == "h264_nvenc" else token for token in ffmpeg_cmd]
+                ffmpeg_result = subprocess.run(ffmpeg_cmd_cpu, capture_output=True, text=True)
+
+            if ffmpeg_result.returncode != 0:
+                raise RuntimeError(f"FFmpeg conversion failed: {ffmpeg_result.stderr[:400]}")
+
+            cls._set_job(job_id, hls_progress=100)
+            logger.info("[job:%s] hls_progress=100", job_id)
+
+            master_path = os.path.join(hls_root, "master.m3u8")
+            if not os.path.exists(master_path):
+                raise RuntimeError("master.m3u8 not generated")
+
+            cls._set_job(job_id, phase="cloudflare", cloudflare_progress=1, message="Uploading to Cloudflare R2...")
+            files_to_upload = []
+            for root, _, files in os.walk(hls_root):
+                for file in files:
+                    local_path = os.path.join(root, file)
+                    relative_path = os.path.relpath(local_path, hls_root).replace("\\", "/")
+                    files_to_upload.append((local_path, relative_path))
+
+            total_files = max(len(files_to_upload), 1)
+            s3 = cls._build_s3_client()
+
+            for idx, (local_path, relative_path) in enumerate(files_to_upload, start=1):
+                r2_key = f"{base_r2_path}/{relative_path}"
+                if relative_path.endswith(".m3u8"):
+                    content_type = "application/vnd.apple.mpegurl"
+                elif relative_path.endswith(".ts"):
+                    content_type = "video/MP2T"
+                elif relative_path.endswith(".vtt"):
+                    content_type = "text/vtt"
+                else:
+                    content_type = "application/octet-stream"
 
                 s3.upload_file(
                     local_path,
-                    settings.AWS_STORAGE_BUCKET_NAME,  # ✅ FIX
+                    settings.AWS_STORAGE_BUCKET_NAME,
                     r2_key,
                     ExtraArgs={"ContentType": content_type},
                 )
+                progress = int((idx / total_files) * 100)
+                cls._set_job(job_id, cloudflare_progress=progress)
+                logger.info("[job:%s] cloudflare_progress=%s file=%s", job_id, progress, relative_path)
 
+            playlist_url = (
+                f"{settings.R2_PUBLIC_BASE_URL}/"
+                f"videos/course-{course_id}/{lesson_key}/hls/master.m3u8"
+            )
 
-        # --------------------------------------------------
-        # 7️⃣ Cleanup TEMP
-        # --------------------------------------------------
-        shutil.rmtree(temp_dir)
-        logger.info("🧹 Temp directory cleaned")
+            video = Video.objects.get(id=video_id)
+            video.video_url = playlist_url
+            video.status = "ready"
+            video.save(update_fields=["video_url", "status"])
 
-        # --------------------------------------------------
-        # 8️⃣ Save final playlist URL
-        # --------------------------------------------------
-        playlist_url = (
-            f"{settings.R2_PUBLIC_BASE_URL}/"
-            f"videos/course-{course.id}/{lesson_key}/hls/master.m3u8"
+            result = {
+                "status": "completed",
+                "phase": "done",
+                "message": "Completed successfully.",
+                "subtitle_progress": 100,
+                "hls_progress": 100,
+                "cloudflare_progress": 100,
+                "playlist_url": playlist_url,
+                "subtitle": "VideoProject.vtt",
+            }
+            if subtitle_warning:
+                result["subtitle_warning"] = subtitle_warning
+            cls._set_job(job_id, **result)
+        except Exception as e:
+            logger.exception("[job:%s] Video pipeline failed", job_id)
+            try:
+                video = Video.objects.get(id=video_id)
+                video.status = "failed"
+                video.save(update_fields=["status"])
+            except Exception:
+                pass
+            cls._set_job(
+                job_id,
+                status="failed",
+                phase="failed",
+                message=str(e),
+                error=str(e),
+            )
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def post(self, request):
+        logger.info("Video processing upload request received")
+
+        upload_file = request.FILES.get("file")
+        course_id = request.data.get("course_id")
+        title = request.data.get("title", "Video")
+        description = request.data.get("description", "")
+        language = request.data.get("language", "en")
+
+        if not upload_file or not course_id:
+            return JsonResponse({"error": "Missing video file or course_id"}, status=400)
+
+        ext = os.path.splitext(upload_file.name)[1].lower()
+        allowed_ext = {".mp4", ".mov", ".mkv", ".m4v", ".webm"}
+        if ext not in allowed_ext:
+            return JsonResponse(
+                {"error": "Unsupported format. Upload a video file (mp4/mov/mkv/m4v/webm)."},
+                status=400,
+            )
+
+        course = get_object_or_404(Course, id=course_id)
+
+        video = Video.objects.create(
+            course=course,
+            title=title,
+            description=description,
+            status="uploading"
         )
 
-        video.video_url = playlist_url
-        video.status = "ready"
-        video.save()
+        temp_dir = tempfile.mkdtemp()
+        input_path = os.path.join(temp_dir, f"source{ext}")
+        upload_size = getattr(upload_file, "size", 0) or 0
+        written = 0
+        with open(input_path, "wb+") as dst:
+            for chunk in upload_file.chunks():
+                dst.write(chunk)
+                written += len(chunk)
 
+        lesson_key = f"lesson_{video.id}"
+        job_id = str(uuid.uuid4())
+        self._set_job(
+            job_id,
+            id=job_id,
+            status="processing",
+            phase="upload",
+            message="Upload received. Processing started.",
+            upload_progress=100 if upload_size == 0 else int((written / upload_size) * 100),
+            subtitle_progress=0,
+            hls_progress=0,
+            cloudflare_progress=0,
+            video_id=video.id,
+        )
 
-        logger.info("🎉 Video ready | URL saved: %s", playlist_url)
+        threading.Thread(
+            target=self._run_pipeline,
+            kwargs={
+                "job_id": job_id,
+                "video_id": video.id,
+                "course_id": course.id,
+                "lesson_key": lesson_key,
+                "input_path": input_path,
+                "temp_dir": temp_dir,
+                "language": language,
+            },
+            daemon=True,
+        ).start()
 
         return JsonResponse(
             {
-                "message": "Video uploaded successfully",
-                "playlist_url": playlist_url,
+                "job_id": job_id,
+                "video_id": video.id,
+                "status": "processing",
+                "message": "Upload complete. Processing in background.",
             },
-            status=200,
+            status=202,
         )
 
 
+class AdminVideoUploadProgressAPIView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminUserRole]
+
+    def get(self, request, job_id):
+        job = AdminVideoUploadZipAPIView._get_job(job_id)
+        if not job:
+            return JsonResponse({"error": "Job not found"}, status=404)
+        return JsonResponse(job, status=200)
 from urllib.parse import quote
 from api.serializers import ContactUsSerializer, ProductEnquirySerializer
 from .models import Contactus, ProductEnquiry
