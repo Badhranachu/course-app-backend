@@ -13,6 +13,7 @@ urlpatterns = [
     path("auth/signup/", views.SignupAPIView.as_view(), name="signup"),
     path("auth/login/", views.LoginAPIView.as_view(), name="login"),
     path("auth/seo-login/", views.SEOLoginAPIView.as_view(), name="seo-login"),
+    path("admin/login/", views.AdminLoginAPIView.as_view(), name="admin-login"),
     path("auth/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
 
     # path("auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
@@ -252,6 +253,9 @@ path(
     path("admin/seo/courses/<int:course_id>/", views.SEOCourseMetaAdminAPIView.as_view()),
     path("admin/seo/jobs/<int:job_id>/", views.SEOJobMetaAdminAPIView.as_view()),
     path("admin/seo/backups/", views.SEOBackupListAPIView.as_view()),
+    path("admin/users/", views.AdminUserListCreateAPIView.as_view()),
+    path("admin/users/<int:user_id>/", views.AdminUserDetailAPIView.as_view()),
+    path("admin/models/summary/", views.AdminModelSummaryAPIView.as_view()),
 
 
   

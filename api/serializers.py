@@ -594,5 +594,44 @@ class SEOChangeBackupSerializer(serializers.ModelSerializer):
         ]
 
 
+class AdminUserManagementSerializer(serializers.ModelSerializer):
+    password = serializers.CharField(write_only=True, required=False, min_length=6)
+
+    class Meta:
+        model = CustomUser
+        fields = [
+            "id",
+            "email",
+            "role",
+            "is_active",
+            "is_staff",
+            "date_joined",
+            "password",
+        ]
+        read_only_fields = ["id", "date_joined"]
+
+    def validate_email(self, value):
+        return value.strip().lower()
+
+    def create(self, validated_data):
+        password = validated_data.pop("password", None)
+        if not password:
+            raise serializers.ValidationError({"password": "Password is required."})
+        return CustomUser.objects.create_user(password=password, **validated_data)
+
+    def update(self, instance, validated_data):
+        password = validated_data.pop("password", None)
+        for key, value in validated_data.items():
+            setattr(instance, key, value)
+
+        if password:
+            instance.set_password(password)
+
+        instance.save()
+        return instance
+
+
+
+
 
 

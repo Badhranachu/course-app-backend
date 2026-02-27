@@ -12,6 +12,7 @@ import razorpay
 import os
 import zipfile
 from rest_framework.views import APIView
+from rest_framework.exceptions import ValidationError
 from django.shortcuts import get_object_or_404
 
 
@@ -29,7 +30,7 @@ from .serializers import (
     CourseListSerializer, VideoSerializer, EnrollmentSerializer,
     CourseModuleSerializer, TestDetailSerializer,
     SEOPageMetaSerializer, CourseSEOMetaSerializer, JobSEOMetaSerializer,
-    SEOChangeBackupSerializer
+    SEOChangeBackupSerializer, AdminUserManagementSerializer
 )
 
 # ------------------------------------------------------------
@@ -160,6 +161,52 @@ class SEOLoginAPIView(APIView):
         if not hasattr(user, "seo_profile"):
             return Response(
                 {"error": "SEO profile not found for this account"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        refresh = RefreshToken.for_user(user)
+        return Response({
+            "access": str(refresh.access_token),
+            "refresh": str(refresh),
+            "user": {
+                "id": user.id,
+                "email": user.email,
+                "role": user.role,
+            }
+        }, status=status.HTTP_200_OK)
+
+
+class AdminLoginAPIView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        email = request.data.get("email")
+        password = request.data.get("password")
+
+        if not email or not password:
+            return Response(
+                {"error": "Email and password required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        email = email.strip().lower()
+        user = authenticate(request=request, username=email, password=password)
+
+        if not user:
+            return Response(
+                {"error": "Invalid credentials"},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+
+        if not user.is_active:
+            return Response(
+                {"error": "Account is disabled"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        if user.role != "admin":
+            return Response(
+                {"error": "Only admin users can login here"},
                 status=status.HTTP_403_FORBIDDEN
             )
 
@@ -3557,6 +3604,214 @@ class CoordinatorPaymentDashboardAPIView(APIView):
                 else "Minimum 5 students required"
             )
         })
+
+
+def _ensure_role_profile(user):
+    if user.role == "admin" and not hasattr(user, "admin_profile"):
+        from api.models import AdminProfile
+        AdminProfile.objects.get_or_create(
+            user=user,
+            defaults={"full_name": user.email.split("@")[0]},
+        )
+    elif user.role == "seo" and not hasattr(user, "seo_profile"):
+        from api.models import SEOProfile
+        SEOProfile.objects.get_or_create(
+            user=user,
+            defaults={"full_name": user.email.split("@")[0]},
+        )
+
+
+def _serialize_admin_user(user):
+    profile_data = {}
+    if user.role == "admin":
+        profile = getattr(user, "admin_profile", None)
+        if profile:
+            profile_data = {
+                "full_name": profile.full_name,
+                "phone": profile.phone,
+                "linkedin_url": profile.linkedin_url,
+                "website_url": profile.website_url,
+            }
+    elif user.role == "seo":
+        profile = getattr(user, "seo_profile", None)
+        if profile:
+            profile_data = {
+                "full_name": profile.full_name,
+            }
+    elif user.role == "student":
+        profile = getattr(user, "student_profile", None)
+        if profile:
+            profile_data = {
+                "full_name": profile.full_name,
+                "gender": profile.gender,
+                "phone": profile.phone,
+                "college_name": profile.college_name,
+                "github_url": profile.github_url,
+                "batch": profile.batch,
+            }
+    elif user.role == "coordinator":
+        profile = getattr(user, "coordinator_profile", None)
+        if profile:
+            photo_url = f"https://cdn.nexston.in/{profile.photo.name}" if profile.photo else ""
+            profile_data = {
+                "coordinator_id": profile.coordinator_id,
+                "full_name": profile.full_name,
+                "email": profile.email,
+                "phone": profile.phone,
+                "address": profile.address,
+                "college_name": profile.college_name,
+                "photo": photo_url,
+            }
+
+    return {
+        **AdminUserManagementSerializer(user).data,
+        "profile": profile_data,
+    }
+
+
+def _update_user_profile(user, profile_payload):
+    if not isinstance(profile_payload, dict):
+        raise ValidationError({"profile": "Profile data must be an object."})
+
+    if user.role == "admin":
+        from api.models import AdminProfile
+        profile, _ = AdminProfile.objects.get_or_create(
+            user=user,
+            defaults={"full_name": user.email.split("@")[0]},
+        )
+        if "full_name" in profile_payload:
+            profile.full_name = profile_payload.get("full_name", "").strip()
+        if "phone" in profile_payload:
+            profile.phone = profile_payload.get("phone", "").strip()
+        if "linkedin_url" in profile_payload:
+            profile.linkedin_url = profile_payload.get("linkedin_url") or ""
+        if "website_url" in profile_payload:
+            profile.website_url = profile_payload.get("website_url") or ""
+        profile.save()
+        return
+
+    if user.role == "seo":
+        from api.models import SEOProfile
+        profile, _ = SEOProfile.objects.get_or_create(
+            user=user,
+            defaults={"full_name": user.email.split("@")[0]},
+        )
+        if "full_name" in profile_payload:
+            profile.full_name = profile_payload.get("full_name", "").strip()
+        profile.save()
+        return
+
+    if user.role == "student":
+        profile = getattr(user, "student_profile", None)
+        if not profile:
+            raise ValidationError({"profile": "Student profile not found for this user."})
+        for field in ["full_name", "gender", "phone", "college_name", "github_url", "batch"]:
+            if field in profile_payload:
+                setattr(profile, field, (profile_payload.get(field) or "").strip())
+        profile.save()
+        return
+
+    if user.role == "coordinator":
+        profile = getattr(user, "coordinator_profile", None)
+        if not profile:
+            raise ValidationError({"profile": "Coordinator profile not found for this user."})
+        for field in ["full_name", "phone", "address", "college_name"]:
+            if field in profile_payload:
+                setattr(profile, field, (profile_payload.get(field) or "").strip())
+        if "email" in profile_payload:
+            profile.email = (profile_payload.get("email") or "").strip().lower()
+        profile.save()
+
+
+class AdminUserListCreateAPIView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminUserRole]
+
+    def get(self, request):
+        role = request.query_params.get("role")
+        search = (request.query_params.get("search") or "").strip()
+
+        qs = CustomUser.objects.all().order_by("-date_joined")
+        if role in dict(CustomUser.ROLE_CHOICES):
+            qs = qs.filter(role=role)
+        if search:
+            qs = qs.filter(email__icontains=search)
+
+        return Response([_serialize_admin_user(user) for user in qs])
+
+    def post(self, request):
+        payload = request.data.copy()
+        profile_payload = payload.pop("profile", None)
+
+        serializer = AdminUserManagementSerializer(data=payload)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
+        _ensure_role_profile(user)
+        if profile_payload:
+            _update_user_profile(user, profile_payload)
+        return Response(
+            _serialize_admin_user(user),
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class AdminUserDetailAPIView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminUserRole]
+
+    def get_object(self, user_id):
+        return get_object_or_404(CustomUser, id=user_id)
+
+    def get(self, request, user_id):
+        user = self.get_object(user_id)
+        return Response(_serialize_admin_user(user))
+
+    def patch(self, request, user_id):
+        user = self.get_object(user_id)
+        payload = request.data.copy()
+        profile_payload = payload.pop("profile", None)
+
+        serializer = AdminUserManagementSerializer(
+            user,
+            data=payload,
+            partial=True,
+        )
+        serializer.is_valid(raise_exception=True)
+        updated_user = serializer.save()
+        _ensure_role_profile(updated_user)
+        if profile_payload is not None:
+            _update_user_profile(updated_user, profile_payload)
+        return Response(_serialize_admin_user(updated_user))
+
+    def delete(self, request, user_id):
+        user = self.get_object(user_id)
+        if user.id == request.user.id:
+            return Response(
+                {"error": "You cannot delete your own admin account."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        user.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class AdminModelSummaryAPIView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminUserRole]
+
+    def get(self, request):
+        from django.apps import apps
+
+        model_rows = []
+        for model in apps.get_app_config("api").get_models():
+            if model._meta.auto_created:
+                continue
+
+            model_rows.append({
+                "model": model.__name__,
+                "db_table": model._meta.db_table,
+                "count": model.objects.count(),
+                "fields": [field.name for field in model._meta.fields],
+            })
+
+        model_rows.sort(key=lambda item: item["model"])
+        return Response(model_rows)
 
 
 def _build_seo_payload(base_title="", base_description="", image_url="", overrides=None):
